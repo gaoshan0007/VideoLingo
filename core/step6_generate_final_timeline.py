@@ -62,6 +62,9 @@ def get_sentence_timestamps(df_words, df_sentences):
             # if 5 consecutive words don't match, break the loop
             if decreasing_count >= 5:
                 break
+
+            if sentence == '':
+                break
             word_index += 1
         
         #! Originally 0.9, but for very short sentences, a single space can cause a difference of 0.8, so we lower the threshold
@@ -69,8 +72,9 @@ def get_sentence_timestamps(df_words, df_sentences):
             time_stamp_list.append((float(best_match['start']), float(best_match['end'])))
             word_index = start_index + best_match['word_count']  # update word_index to the start of the next sentence
         else:
-            print(f"⚠️ Warning: No match found for sentence: {sentence}\nOriginal: {repr(sentence)}\nMatched: {best_match['phrase']}\nSimilarity: {best_match['score']:.2f}\n{'─' * 50}")
-            raise ValueError("❎ No match found for sentence. Please delete the 'output' directory and rerun the process, ensuring UVR is activated before transcription.")
+            print(f"⚠️ Warning: No match found for sentence: {sentence}\nOriginal: ")
+            #print(f"⚠️ Warning: No match found for sentence: {sentence}\nOriginal: {repr(sentence)}\nMatched: {best_match['phrase']}\nSimilarity: {best_match['score']:.2f}\n{'─' * 50}")
+            #raise ValueError("❎ No match found for sentence. Please delete the 'output' directory and rerun the process, ensuring UVR is activated before transcription.")
         
         start_index = word_index  # update start_index for the next sentence
     
