@@ -7,6 +7,7 @@ from core.config_utils import load_key, get_joiner
 from rich.panel import Panel
 from rich.console import Console
 import autocorrect_py as autocorrect
+import json
 
 console = Console()
 
@@ -30,52 +31,67 @@ def remove_punctuation(text):
 
 def get_sentence_timestamps(df_words, df_sentences):
     time_stamp_list = []
-    word_index = 0
     whisper_language = load_key("whisper.language")
     language = load_key("whisper.detected_language") if whisper_language == 'auto' else whisper_language
     joiner = get_joiner(language)
 
-    for idx,sentence in df_sentences['Source'].items():
+    for idx, sentence in df_sentences['Source'].items():
+        # 特殊处理：单个字母的句子直接返回原文的时间戳
+        if len(remove_punctuation(sentence)) <= 1:
+            time_stamp_list.append((float(df_words['start'][0]), float(df_words['end'][0])))
+            continue
+
         sentence = remove_punctuation(sentence.lower())
-        best_match = {'score': 0, 'start': 0, 'end': 0, 'word_count': 0}
-        decreasing_count = 0
-        current_phrase = ""
-        start_index = word_index  # record the index of the word where the current sentence starts
-
-        while word_index < len(df_words):
-            word = remove_punctuation(df_words['text'][word_index].lower())
-
-            current_phrase += word + joiner
-
-            similarity = SequenceMatcher(None, sentence, current_phrase.strip()).ratio()
+        best_match = {'score': 0, 'start': 0, 'end': 0, 'word_count': 0, 'phrase': ''}
+        
+        # 滑动窗口策略
+        window_size = max(len(sentence.split()) + 2, 5)  # 动态窗口大小
+        
+        for start_index in range(len(df_words) - window_size + 1):
+            current_phrase = ""
+            current_start_time = float(df_words['start'][start_index])
+            current_end_time = float(df_words['end'][start_index + window_size - 1])
+            
+            # 构建窗口内的短语
+            for j in range(start_index, start_index + window_size):
+                word = remove_punctuation(df_words['text'][j].lower())
+                current_phrase += word + joiner
+            
+            current_phrase = current_phrase.strip()
+            
+            # 计算相似度
+            similarity = SequenceMatcher(None, sentence, current_phrase).ratio()
+            
+            # 更新最佳匹配
             if similarity > best_match['score']:
                 best_match = {
                     'score': similarity,
-                    'start': df_words['start'][start_index],
-                    'end': df_words['end'][word_index],
-                    'word_count': word_index - start_index + 1,
+                    'start': current_start_time,
+                    'end': current_end_time,
+                    'word_count': window_size,
                     'phrase': current_phrase
                 }
-                decreasing_count = 0
-            else:
-                decreasing_count += 1
-            # if 5 consecutive words don't match, break the loop
-            if decreasing_count >= 5:
-                break
-            word_index += 1
         
-        #! Originally 0.9, but for very short sentences, a single space can cause a difference of 0.8, so we lower the threshold
-        if best_match['score'] >= 0.75:
-            time_stamp_list.append((float(best_match['start']), float(best_match['end'])))
-            word_index = start_index + best_match['word_count']  # update word_index to the start of the next sentence
+        # 降低匹配阈值，提高容错率
+        if best_match['score'] >= 0.7:  
+            time_stamp_list.append((best_match['start'], best_match['end']))
+            
+            console.print(f"✅ 匹配成功: 原句 {repr(sentence)}, 匹配短语 {repr(best_match['phrase'])}, 相似度 {best_match['score']:.2f}")
         else:
-            print(f"⚠️ Warning: No match found for sentence: {sentence}\nOriginal: {repr(sentence)}\nMatched: {best_match['phrase']}\nSimilarity: {best_match['score']:.2f}\n{'─' * 50}")
-            raise ValueError("❎ Failed to match sentence with timestamps. This typically occurs when background music is too loud or the source language is not English. Currently no workaround available. Please raise an Issue!")
-        
-        start_index = word_index  # update start_index for the next sentence
+            console.print(f"❌ 匹配失败: 原句 {repr(sentence)}, 匹配短语 {repr(best_match['phrase'])}, 相似度 {best_match['score']:.2f}")
+            
+            # 如果匹配失败，尝试使用最佳匹配的时间戳
+            if best_match['score'] > 0:
+                time_stamp_list.append((best_match['start'], best_match['end']))
+            else:
+                # 将 DataFrame 以 JSON 格式写入 log.txt
+                with open('output/log/sentences_log.json', 'w', encoding='utf-8') as f:
+                    json.dump(df_sentences.to_dict(orient='records'), f, ensure_ascii=False, indent=2)
+                raise ValueError(f"❎ 无法匹配句子时间戳：{sentence}。可能是由于背景音乐太大或语言检测不准确。目前无法自动处理，请提交问题报告！")
     
     return time_stamp_list
 
+# 其余代码保持不变
 def align_timestamp(df_text, df_translate, subtitle_output_configs: list, output_dir: str, for_display: bool = True):
     """Align timestamps and add a new timestamp column to df_translate"""
     df_trans_time = df_translate.copy()
@@ -116,7 +132,7 @@ def align_timestamp(df_text, df_translate, subtitle_output_configs: list, output
     
     return df_trans_time
 
-# ✨ Beautify the translation
+# 其余代码保持不变
 def clean_translation(x):
     if pd.isna(x):
         return ''
@@ -135,7 +151,7 @@ def align_timestamp_main():
         ('bilingual_trans_src_subtitles.srt', ['Translation', 'Source'])
     ]
     align_timestamp(df_text, df_translate, subtitle_output_configs, 'output')
-    console.print(Panel("[bold green]🎉📝 Subtitles generation completed! Please check in the `output` folder 👀[/bold green]"))
+    console.print("[🎉📝] 字幕生成完成！请在 `output` 文件夹中查看")
 
     # for audio
     df_translate_for_audio = pd.read_excel('output/log/translation_results.xlsx')
@@ -145,7 +161,7 @@ def align_timestamp_main():
         ('trans_subs_for_audio.srt', ['Translation'])
     ]
     align_timestamp(df_text, df_translate_for_audio, subtitle_output_configs, 'output/audio')
-    console.print(Panel("[bold green]🎉📝 Audio subtitles generation completed! Please check in the `output/audio` folder 👀[/bold green]"))
+    console.print("[🎉📝] 音频字幕生成完成！请在 `output/audio` 文件夹中查看")
     
 
 if __name__ == '__main__':

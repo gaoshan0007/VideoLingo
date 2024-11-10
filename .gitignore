@@ -174,4 +174,4 @@ dev/
 
 #myfile
 config.yaml
-
+*.xls*

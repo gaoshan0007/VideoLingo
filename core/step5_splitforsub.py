@@ -47,7 +47,17 @@ def align_subs(src_sub: str, tr_sub: str, src_part: str) -> Tuple[List[str], Lis
     align_data = parsed[f'align_{best}']
     
     src_parts = src_part.split('\n')
-    tr_parts = [item[f'target_part_{i+1}'].strip() for i, item in enumerate(align_data)]
+    
+    # 修改这部分代码以增加错误处理
+    tr_parts = []
+    for i in range(len(src_parts)):
+        target_key = f'target_part_{i+1}'
+        if target_key in align_data:
+            tr_parts.append(align_data[target_key].strip())
+        else:
+            # 如果没有对应的键，使用原始翻译文本作为备选
+            tr_parts.append(tr_sub)
+            console.print(f"[yellow]警告：缺少 {target_key}，使用原始翻译文本作为备选[/yellow]")
     
     table = Table(title="🔗 Aligned parts")
     table.add_column("Language", style="cyan")
@@ -65,54 +75,43 @@ def split_align_subs(src_lines: List[str], tr_lines: List[str], max_retry=5) -> 
     
     for attempt in range(max_retry):
         console.print(Panel(f"🔄 Split attempt {attempt + 1}", expand=False))
+        to_split = []
         
-        # 创建需要分割的行的索引列表
-        to_split = [
-            i for i, (src, tr) in enumerate(zip(src_lines, tr_lines))
-            if len(str(src)) > MAX_SUB_LENGTH or calc_len(str(tr)) * TARGET_SUB_MULTIPLIER > MAX_SUB_LENGTH
-        ]
+        # 创建可变副本，以便在循环中修改
+        current_src_lines = src_lines.copy()
+        current_tr_lines = tr_lines.copy()
         
-        # 如果没有需要分割的行，则退出循环
-        if not to_split:
-            break
+        for i, (src, tr) in enumerate(zip(current_src_lines, current_tr_lines)):
+            src, tr = str(src), str(tr)
+            if len(src) > MAX_SUB_LENGTH or calc_len(tr) * TARGET_SUB_MULTIPLIER > MAX_SUB_LENGTH:
+                to_split.append(i)
+                table = Table(title=f"📏 Line {i} needs to be split")
+                table.add_column("Type", style="cyan")
+                table.add_column("Content", style="magenta")
+                table.add_row("Source Line", src)
+                table.add_row("Target Line", tr)
+                console.print(table)
         
-        # 打印需要分割的行
-        for i in to_split:
-            table = Table(title=f"📏 Line {i} needs to be split")
-            table.add_column("Type", style="cyan")
-            table.add_column("Content", style="magenta")
-            table.add_row("Source Line", str(src_lines[i]))
-            table.add_row("Target Line", str(tr_lines[i]))
-            console.print(table)
+        def process(i):
+            split_src = split_sentence(current_src_lines[i], num_parts=2).strip()
+            src_split, tr_split = align_subs(current_src_lines[i], current_tr_lines[i], split_src)
+            return src_split, tr_split
         
-        # 使用线程池处理分割和对齐
+        # 使用线程池并发处理需要分割的行
         with concurrent.futures.ThreadPoolExecutor(max_workers=load_key("max_workers")) as executor:
-            # 为每个需要分割的行创建一个Future
-            futures = {
-                executor.submit(align_subs, str(src_lines[i]), str(tr_lines[i]), split_sentence(str(src_lines[i]), num_parts=2).strip()): i
-                for i in to_split
-            }
-            
-            # 存储分割后的结果
-            split_results = {}
-            for future in concurrent.futures.as_completed(futures):
-                index = futures[future]
-                try:
-                    split_results[index] = future.result()
-                except Exception as exc:
-                    console.print(f"Line {index} generated an exception: {exc}")
+            results = list(executor.map(process, to_split))
         
-        # 更新源文本和翻译文本
-        for index, (src_split, tr_split) in split_results.items():
-            src_lines[index:index+1] = src_split
-            tr_lines[index:index+1] = tr_split
+        # 更新需要分割的行
+        for idx, (i, (src_split, tr_split)) in enumerate(zip(to_split, results)):
+            current_src_lines[i:i+1] = src_split
+            current_tr_lines[i:i+1] = tr_split
         
         # 检查是否满足长度要求
-        if all(len(str(src)) <= MAX_SUB_LENGTH for src in src_lines) and \
-           all(calc_len(str(tr)) * TARGET_SUB_MULTIPLIER <= MAX_SUB_LENGTH for tr in tr_lines):
-            break
+        if all(len(src) <= MAX_SUB_LENGTH for src in current_src_lines) and \
+           all(calc_len(tr) * TARGET_SUB_MULTIPLIER <= MAX_SUB_LENGTH for tr in current_tr_lines):
+            return current_src_lines, current_tr_lines
     
-    return src_lines, tr_lines
+    return current_src_lines, current_tr_lines
 
 def split_for_sub_main():
     if os.path.exists("output/log/translation_results_for_subtitles.xlsx"):

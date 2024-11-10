@@ -56,26 +56,8 @@ def split_sentence(sentence, num_parts, word_limit=18, index=-1, retry_attempt=0
         if 'best' not in response_data:
             return {"status": "error", "message": "Missing required key: `best`"}
         return {"status": "success", "message": "Split completed"}
-    
-    # 重试机制
-    for attempt in range(3):  # 总共尝试3次
-        response_data = ask_gpt(split_prompt + ' ' * (retry_attempt + attempt), response_json=True, valid_def=valid_split, log_title='sentence_splitbymeaning',skip_history=True)
-        
-        try:
-            best_split_key = f"split_{response_data['best']}"
-            if best_split_key not in response_data:
-                console.print(f"[yellow]Warning: Missing key {best_split_key}, retrying... (Attempt {attempt + 1})[/yellow]")
-                continue
-            
-            best_split = response_data[best_split_key]
-            break
-        except KeyError:
-            console.print(f"[yellow]Warning: Key error, retrying... (Attempt {attempt + 1})[/yellow]")
-    else:
-        # 如果3次重试都失败，返回原句
-        console.print(f"[red]Error: Unable to split sentence after 3 attempts[/red]")
-        return sentence
-
+    response_data = ask_gpt(split_prompt + ' ' * retry_attempt, response_json=True, valid_def=valid_split, log_title='sentence_splitbymeaning')
+    best_split = response_data[f"split_{response_data['best']}"]
     split_points = find_split_positions(sentence, best_split)
     # split the sentence based on the split points
     for i, split_point in enumerate(split_points):
