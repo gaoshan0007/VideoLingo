@@ -44,8 +44,8 @@ def get_sentence_timestamps(df_words, df_sentences):
         sentence = remove_punctuation(sentence.lower())
         best_match = {'score': 0, 'start': 0, 'end': 0, 'word_count': 0, 'phrase': ''}
         
-        # 滑动窗口策略
-        window_size = max(len(sentence.split()) + 2, 5)  # 动态窗口大小
+        # 更严格的滑动窗口策略
+        window_size = max(len(sentence.split()) + 1, 3)  # 减小窗口大小
         
         for start_index in range(len(df_words) - window_size + 1):
             current_phrase = ""
@@ -59,21 +59,23 @@ def get_sentence_timestamps(df_words, df_sentences):
             
             current_phrase = current_phrase.strip()
             
-            # 计算相似度
+            # 计算相似度，增加对短语长度的惩罚
             similarity = SequenceMatcher(None, sentence, current_phrase).ratio()
+            length_penalty = min(1, len(sentence) / len(current_phrase))
+            adjusted_similarity = similarity * length_penalty
             
             # 更新最佳匹配
-            if similarity > best_match['score']:
+            if adjusted_similarity > best_match['score']:
                 best_match = {
-                    'score': similarity,
+                    'score': adjusted_similarity,
                     'start': current_start_time,
                     'end': current_end_time,
                     'word_count': window_size,
                     'phrase': current_phrase
                 }
         
-        # 降低匹配阈值，提高容错率
-        if best_match['score'] >= 0.7:  
+        # 提高匹配阈值，减少不准确的匹配
+        if best_match['score'] >= 0.8:  
             time_stamp_list.append((best_match['start'], best_match['end']))
             
             console.print(f"✅ 匹配成功: 原句 {repr(sentence)}, 匹配短语 {repr(best_match['phrase'])}, 相似度 {best_match['score']:.2f}")
@@ -91,7 +93,6 @@ def get_sentence_timestamps(df_words, df_sentences):
     
     return time_stamp_list
 
-# 其余代码保持不变
 def align_timestamp(df_text, df_translate, subtitle_output_configs: list, output_dir: str, for_display: bool = True):
     """Align timestamps and add a new timestamp column to df_translate"""
     df_trans_time = df_translate.copy()
@@ -106,11 +107,19 @@ def align_timestamp(df_text, df_translate, subtitle_output_configs: list, output
     df_trans_time['timestamp'] = time_stamp_list
     df_trans_time['duration'] = df_trans_time['timestamp'].apply(lambda x: x[1] - x[0])
 
-    # Remove gaps 🕳️
+    # 更严格地处理时间间隔，防止重叠 🕳️
     for i in range(len(df_trans_time)-1):
-        delta_time = df_trans_time.loc[i+1, 'timestamp'][0] - df_trans_time.loc[i, 'timestamp'][1]
-        if 0 < delta_time < 1:
-            df_trans_time.at[i, 'timestamp'] = (df_trans_time.loc[i, 'timestamp'][0], df_trans_time.loc[i+1, 'timestamp'][0])
+        current_end = df_trans_time.loc[i, 'timestamp'][1]
+        next_start = df_trans_time.loc[i+1, 'timestamp'][0]
+        
+        # 如果当前字幕结束时间大于下一个字幕的开始时间，调整时间
+        if current_end > next_start:
+            # 将当前字幕的结束时间设置为下一个字幕开始时间的前0.1秒
+            df_trans_time.at[i, 'timestamp'] = (df_trans_time.loc[i, 'timestamp'][0], next_start - 0.1)
+            
+            # 如果调整后的结束时间小于开始时间，则设置为开始时间
+            if df_trans_time.loc[i, 'timestamp'][1] <= df_trans_time.loc[i, 'timestamp'][0]:
+                df_trans_time.at[i, 'timestamp'] = (df_trans_time.loc[i, 'timestamp'][0], df_trans_time.loc[i, 'timestamp'][0] + 0.1)
 
     # Convert start and end timestamps to SRT format
     df_trans_time['timestamp'] = df_trans_time['timestamp'].apply(lambda x: convert_to_srt_format(x[0], x[1]))
@@ -132,7 +141,6 @@ def align_timestamp(df_text, df_translate, subtitle_output_configs: list, output
     
     return df_trans_time
 
-# 其余代码保持不变
 def clean_translation(x):
     if pd.isna(x):
         return ''
