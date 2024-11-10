@@ -43,13 +43,15 @@ def check_ask_gpt_history(prompt, model, log_title):
                     return item["response"]
     return False
 
-def ask_gpt(prompt, response_json=True, valid_def=None, log_title='default'):
+def ask_gpt(prompt, response_json=True, valid_def=None, log_title='default', skip_history=False):
     api_set = load_key("api")
     llm_support_json = load_key("llm_support_json")
     with LOCK:
-        history_response = check_ask_gpt_history(prompt, api_set["model"], log_title)
-        if history_response:
-            return history_response
+        # 如果 skip_history 为 False，则检查历史记录
+        if not skip_history:
+            history_response = check_ask_gpt_history(prompt, api_set["model"], log_title)
+            if history_response:
+                return history_response
     
     if not api_set["key"]:
         raise ValueError(f"⚠️API_KEY is missing")
@@ -60,7 +62,7 @@ def ask_gpt(prompt, response_json=True, valid_def=None, log_title='default'):
     client = OpenAI(api_key=api_set["key"], base_url=base_url)
     response_format = {"type": "json_object"} if response_json and api_set["model"] in llm_support_json else None
 
-    max_retries = 3
+    max_retries = 5
     for attempt in range(max_retries):
         try:
             response = client.chat.completions.create(
