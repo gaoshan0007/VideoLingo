@@ -60,7 +60,7 @@ def translate_all():
         chunks = split_chunks_by_chars()
     else:
         console.print("[yellow]🚨 Not using sonnet, using smaller chunk size and max_i to avoid OOM[/yellow]")
-        chunks = split_chunks_by_chars(chunk_size=500, max_i=10)
+        chunks = split_chunks_by_chars(chunk_size=400, max_i=8)
     with open('output/log/terminology.json', 'r', encoding='utf-8') as file:
         theme_prompt = json.load(file).get('theme')
 
