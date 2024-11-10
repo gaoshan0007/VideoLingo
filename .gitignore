@@ -175,3 +175,4 @@ dev/
 #myfile
 config.yaml
 *.xls*
+batch/tasks_setting.xlsx
