@@ -7,6 +7,8 @@ from rich.console import Console
 from rich.table import Table
 from rich import box
 import re
+import json
+import traceback
 
 console = Console()
 
@@ -22,55 +24,92 @@ def valid_translate_result(result: dict, required_keys: list, required_sub_keys:
 
     return {"status": "success", "message": "Translation completed"}
 
+def log_translation_error(prompt, error_msg, step_name, index):
+    """记录翻译错误到日志文件"""
+    error_log_dir = 'output/gpt_log'
+    os.makedirs(error_log_dir, exist_ok=True)
+    error_log_path = os.path.join(error_log_dir, 'error.json')
+    
+    error_data = {
+        'timestamp': os.path.getctime(error_log_path) if os.path.exists(error_log_path) else None,
+        'step': step_name,
+        'block_index': index,
+        'error_message': error_msg,
+        'prompt': prompt
+    }
+    
+    with open(error_log_path, 'w', encoding='utf-8') as f:
+        json.dump(error_data, f, ensure_ascii=False, indent=2)
+
 def translate_lines(lines, previous_content_prompt, after_cotent_prompt, things_to_note_prompt, summary_prompt, index = 0):
-    shared_prompt = generate_shared_prompt(previous_content_prompt, after_cotent_prompt, summary_prompt, things_to_note_prompt)
+    # 如果输入为空，直接返回空翻译
+    if not lines or lines.strip() == '':
+        console.print(f"[yellow]⚠️ 跳过空白内容块 {index}[/yellow]")
+        return '', lines
 
-    # Retry translation if the length of the original text and the translated text are not the same, or if the specified key is missing
-    def retry_translation(prompt, step_name):
-        def valid_faith(response_data):
-            return valid_translate_result(response_data, ['1'], ['direct'])
-        def valid_express(response_data):
-            return valid_translate_result(response_data, ['1'], ['free'])
-        for retry in range(3):
-            if step_name == 'faithfulness':
-                result = ask_gpt(prompt, response_json=True, valid_def=valid_faith, log_title=f'translate_{step_name}')
-            elif step_name == 'expressiveness':
-                result = ask_gpt(prompt, response_json=True, valid_def=valid_express, log_title=f'translate_{step_name}')
-            if len(lines.split('\n')) == len(result):
-                return result
-            if retry != 2:
-                console.print(f'[yellow]⚠️ {step_name.capitalize()} translation of block {index} failed, Retry...[/yellow]')
-        raise ValueError(f'[red]❌ {step_name.capitalize()} translation of block {index} failed after 3 retries. Please check `output/gpt_log/error.json` for more details.[/red]')
+    try:
+        shared_prompt = generate_shared_prompt(previous_content_prompt, after_cotent_prompt, summary_prompt, things_to_note_prompt)
 
-    ## Step 1: Faithful to the Original Text
-    prompt1 = get_prompt_faithfulness(lines, shared_prompt)
-    faith_result = retry_translation(prompt1, 'faithfulness')
+        # 改进的重试翻译机制
+        def retry_translation(prompt, step_name):
+            def valid_faith(response_data):
+                return valid_translate_result(response_data, ['1'], ['direct'])
+            def valid_express(response_data):
+                return valid_translate_result(response_data, ['1'], ['free'])
+            
+            max_retries = 3
+            
+            for retry in range(max_retries):
+                try:
+                    if step_name == 'faithfulness':
+                        result = ask_gpt(prompt, response_json=True, valid_def=valid_faith, log_title=f'translate_{step_name}')
+                    elif step_name == 'expressiveness':
+                        result = ask_gpt(prompt, response_json=True, valid_def=valid_express, log_title=f'translate_{step_name}')
+                    
+                    # 检查翻译结果的行数
+                    if len(lines.split('\n')) == len(result):
+                        return result
+                    
+                    console.print(f'[yellow]⚠️ {step_name.capitalize()} translation of block {index} failed, line count mismatch. Retry {retry+1}...[/yellow]')
+                
+                except Exception as e:
+                    error_msg = f"Translation error: {str(e)}\n{traceback.format_exc()}"
+                    console.print(f'[red]❌ {step_name.capitalize()} translation error: {error_msg}[/red]')
+                    log_translation_error(prompt, error_msg, step_name, index)
+            
+            # 如果所有重试都失败，返回空结果
+            console.print(f'[red]❌ {step_name.capitalize()} translation of block {index} failed after {max_retries} retries. Returning blank translation.[/red]')
+            return {str(i+1): {'origin': line, 'direct': '', 'free': ''} for i, line in enumerate(lines.split('\n'))}
 
-    for i in faith_result:
-        faith_result[i]["direct"] = faith_result[i]["direct"].replace('\n', ' ')
+        ## Step 1: Faithful to the Original Text
+        prompt1 = get_prompt_faithfulness(lines, shared_prompt)
+        faith_result = retry_translation(prompt1, 'faithfulness')
 
-    ## Step 2: Express Smoothly  
-    prompt2 = get_prompt_expressiveness(faith_result, lines, shared_prompt)
-    express_result = retry_translation(prompt2, 'expressiveness')
+        for i in faith_result:
+            faith_result[i]["direct"] = faith_result[i]["direct"].replace('\n', ' ')
 
-    table = Table(title="Translation Results", show_header=False, box=box.ROUNDED)
-    table.add_column("Translations", style="bold")
-    for i, key in enumerate(express_result):
-        table.add_row(f"[cyan]Origin:  {faith_result[key]['origin']}[/cyan]")
-        table.add_row(f"[magenta]Direct:  {faith_result[key]['direct']}[/magenta]")
-        table.add_row(f"[green]Free:    {express_result[key]['free']}[/green]")
-        if i < len(express_result) - 1:
-            table.add_row("[yellow]" + "-" * 50 + "[/yellow]")
+        ## Step 2: Express Smoothly  
+        prompt2 = get_prompt_expressiveness(faith_result, lines, shared_prompt)
+        express_result = retry_translation(prompt2, 'expressiveness')
 
-    console.print(table)
+        translate_result = "\n".join([express_result[i]["free"].replace('\n', ' ').strip() for i in express_result])
 
-    translate_result = "\n".join([express_result[i]["free"].replace('\n', ' ').strip() for i in express_result])
+        # 如果翻译结果为空，返回原文
+        if not translate_result.strip():
+            console.print(f'[yellow]⚠️ Translation of block {index} is blank. Returning original text.[/yellow]')
+            return lines, lines
 
-    if len(lines.split('\n')) != len(translate_result.split('\n')):
-        console.print(Panel(f'[red]❌ Translation of block {index} failed, Length Mismatch, Please check `output/gpt_log/translate_expressiveness.json`[/red]'))
-        raise ValueError(f'Origin ···{lines}···,\nbut got ···{translate_result}···')
+        return translate_result, lines
 
-    return translate_result, lines
+    except Exception as e:
+        # 捕获任何未预料的异常
+        error_msg = f"Unexpected error in translation: {str(e)}\n{traceback.format_exc()}"
+        console.print(f'[red]❌ Unexpected translation error for block {index}: {error_msg}[/red]')
+        log_translation_error('', error_msg, 'unexpected', index)
+        
+        # 返回原文
+        console.print(f'[yellow]⚠️ Returning original text for block {index}.[/yellow]')
+        return lines, lines
 
 
 if __name__ == '__main__':

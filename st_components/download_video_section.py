@@ -23,7 +23,9 @@ def download_video_section():
         except:
             col1, col2 = st.columns([3, 1])
             with col1:
-                url = st.text_input("Enter YouTube link:")
+                # 添加默认的 YouTube URL
+                default_url = load_key("default_youtube_url")
+                url = st.text_input("Enter YouTube link:", value=default_url)
             with col2:
                 resolution_dict = {
                     "360p": "360",

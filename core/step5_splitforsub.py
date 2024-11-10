@@ -62,33 +62,54 @@ def split_align_subs(src_lines: List[str], tr_lines: List[str], max_retry=5) -> 
     subtitle_set = load_key("subtitle")
     MAX_SUB_LENGTH = subtitle_set["max_length"]
     TARGET_SUB_MULTIPLIER = subtitle_set["target_multiplier"]
+    
     for attempt in range(max_retry):
         console.print(Panel(f"🔄 Split attempt {attempt + 1}", expand=False))
-        to_split = []
         
-        for i, (src, tr) in enumerate(zip(src_lines, tr_lines)):
-            src, tr = str(src), str(tr)
-            if len(src) > MAX_SUB_LENGTH or calc_len(tr) * TARGET_SUB_MULTIPLIER > MAX_SUB_LENGTH:
-                to_split.append(i)
-                table = Table(title=f"📏 Line {i} needs to be split")
-                table.add_column("Type", style="cyan")
-                table.add_column("Content", style="magenta")
-                table.add_row("Source Line", src)
-                table.add_row("Target Line", tr)
-                console.print(table)
+        # 创建需要分割的行的索引列表
+        to_split = [
+            i for i, (src, tr) in enumerate(zip(src_lines, tr_lines))
+            if len(str(src)) > MAX_SUB_LENGTH or calc_len(str(tr)) * TARGET_SUB_MULTIPLIER > MAX_SUB_LENGTH
+        ]
         
-        def process(i):
-            split_src = split_sentence(src_lines[i], num_parts=2).strip()
-            src_lines[i], tr_lines[i] = align_subs(src_lines[i], tr_lines[i], split_src)
+        # 如果没有需要分割的行，则退出循环
+        if not to_split:
+            break
         
+        # 打印需要分割的行
+        for i in to_split:
+            table = Table(title=f"📏 Line {i} needs to be split")
+            table.add_column("Type", style="cyan")
+            table.add_column("Content", style="magenta")
+            table.add_row("Source Line", str(src_lines[i]))
+            table.add_row("Target Line", str(tr_lines[i]))
+            console.print(table)
+        
+        # 使用线程池处理分割和对齐
         with concurrent.futures.ThreadPoolExecutor(max_workers=load_key("max_workers")) as executor:
-            executor.map(process, to_split)
+            # 为每个需要分割的行创建一个Future
+            futures = {
+                executor.submit(align_subs, str(src_lines[i]), str(tr_lines[i]), split_sentence(str(src_lines[i]), num_parts=2).strip()): i
+                for i in to_split
+            }
+            
+            # 存储分割后的结果
+            split_results = {}
+            for future in concurrent.futures.as_completed(futures):
+                index = futures[future]
+                try:
+                    split_results[index] = future.result()
+                except Exception as exc:
+                    console.print(f"Line {index} generated an exception: {exc}")
         
-        # Flatten `src_lines` and `tr_lines`
-        src_lines = [item for sublist in src_lines for item in (sublist if isinstance(sublist, list) else [sublist])]
-        tr_lines = [item for sublist in tr_lines for item in (sublist if isinstance(sublist, list) else [sublist])]
+        # 更新源文本和翻译文本
+        for index, (src_split, tr_split) in split_results.items():
+            src_lines[index:index+1] = src_split
+            tr_lines[index:index+1] = tr_split
         
-        if all(len(src) <= MAX_SUB_LENGTH for src in src_lines) and all(calc_len(tr) * TARGET_SUB_MULTIPLIER <= MAX_SUB_LENGTH for tr in tr_lines):
+        # 检查是否满足长度要求
+        if all(len(str(src)) <= MAX_SUB_LENGTH for src in src_lines) and \
+           all(calc_len(str(tr)) * TARGET_SUB_MULTIPLIER <= MAX_SUB_LENGTH for tr in tr_lines):
             break
     
     return src_lines, tr_lines

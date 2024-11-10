@@ -171,6 +171,8 @@ Based on the provided original {src_language} subtitles, you need to:
 1. Faithful to the original: Accurately convey the content and meaning of the original text, without arbitrarily changing, adding, or omitting content.
 2. Accurate terminology: Use professional terms correctly and maintain consistency in terminology.
 3. Understand the context: Fully comprehend and reflect the background and contextual relationships of the text.
+4. Json Only: Return only JSON data, do not return any other content.
+5. Data integrity: The answer must include 'origin' and 'direct'.
 
 ### Subtitle Data
 <subtitles>
@@ -272,7 +274,8 @@ Please follow these steps and provide the results for each step in the JSON outp
 1. Analysis and Comparison: Briefly analyze the word order, sentence structure, and semantic correspondence between {src_language} and {target_language} subtitles. Point out key word correspondences, similarities and differences in sentence patterns, and language features that may affect splitting.
 2. Start Alignment: Based on your analysis, provide 2 different alignment methods for {target_language} subtitles according to the format. The split positions in {src_language} must be consistent with the pre-processed {src_language} split version and cannot be changed arbitrarily.
 3. Evaluation and Selection: Examine and briefly evaluate the 2 schemes, considering factors such as sentence completeness, semantic coherence, and appropriateness of split points.
-4. Best Scheme: Select the best alignment scheme, output only a single number, 1 or 2.
+4. Best Scheme: Select the best alignment scheme, output only a single number, 1 or 2, must include the 'best' attribute.
+5. Json Only: Return only JSON data, do not return any other content.
 
 ### Output Format
 Please complete the following JSON data, where << >> represents placeholders, and return your results in JSON format:
