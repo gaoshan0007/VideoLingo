@@ -74,7 +74,7 @@ def ask_gpt(prompt, response_json=True, valid_def=None, log_title='default', ski
                 response_format=response_format,
                 timeout=150 #! set timeout                
             )
-            print(f"current_model-------------------------{current_model}--------------------------")
+            #print(f"current_model-------------------------{current_model}--------------------------")
             if response_json:
                 try:
                     response_data = json_repair.loads(response.choices[0].message.content)
