@@ -9,8 +9,8 @@ import platform
 
 SRC_FONT_SIZE = 16
 TRANS_FONT_SIZE = 18
-FONT_NAME = 'Arial'
-TRANS_FONT_NAME = 'Arial'
+FONT_NAME = 'Microsoft YaHei UI'
+TRANS_FONT_NAME = 'Microsoft YaHei UI'
 
 # Linux need to install google noto fonts: apt-get install fonts-noto
 if platform.system() == 'Linux':

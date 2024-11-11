@@ -37,27 +37,15 @@ def align_subs(src_sub: str, tr_sub: str, src_part: str) -> Tuple[List[str], Lis
     align_prompt = get_align_prompt(src_sub, tr_sub, src_part)
     
     def valid_align(response_data):
-        # check if the best is in the response_data
         if 'best' not in response_data:
             return {"status": "error", "message": "Missing required key: `best`"}
         return {"status": "success", "message": "Align completed"}
-    parsed = ask_gpt(align_prompt, response_json=True, valid_def=valid_align, log_title='align_subs')
 
-    best = int(parsed['best'])
-    align_data = parsed[f'align_{best}']
+    parsed = ask_gpt(align_prompt, response_json=True, valid_def=valid_align, log_title='align_subs')
     
+    align_data = parsed['align']
     src_parts = src_part.split('\n')
-    
-    # 修改这部分代码以增加错误处理
-    tr_parts = []
-    for i in range(len(src_parts)):
-        target_key = f'target_part_{i+1}'
-        if target_key in align_data:
-            tr_parts.append(align_data[target_key].strip())
-        else:
-            # 如果没有对应的键，使用原始翻译文本作为备选
-            tr_parts.append(tr_sub)
-            console.print(f"[yellow]警告：缺少 {target_key}，使用原始翻译文本作为备选[/yellow]")
+    tr_parts = [item[f'target_part_{i+1}'].strip() for i, item in enumerate(align_data)]
     
     table = Table(title="🔗 Aligned parts")
     table.add_column("Language", style="cyan")
@@ -72,16 +60,11 @@ def split_align_subs(src_lines: List[str], tr_lines: List[str], max_retry=5) -> 
     subtitle_set = load_key("subtitle")
     MAX_SUB_LENGTH = subtitle_set["max_length"]
     TARGET_SUB_MULTIPLIER = subtitle_set["target_multiplier"]
-    
     for attempt in range(max_retry):
         console.print(Panel(f"🔄 Split attempt {attempt + 1}", expand=False))
         to_split = []
         
-        # 创建可变副本，以便在循环中修改
-        current_src_lines = src_lines.copy()
-        current_tr_lines = tr_lines.copy()
-        
-        for i, (src, tr) in enumerate(zip(current_src_lines, current_tr_lines)):
+        for i, (src, tr) in enumerate(zip(src_lines, tr_lines)):
             src, tr = str(src), str(tr)
             if len(src) > MAX_SUB_LENGTH or calc_len(tr) * TARGET_SUB_MULTIPLIER > MAX_SUB_LENGTH:
                 to_split.append(i)
@@ -93,25 +76,20 @@ def split_align_subs(src_lines: List[str], tr_lines: List[str], max_retry=5) -> 
                 console.print(table)
         
         def process(i):
-            split_src = split_sentence(current_src_lines[i], num_parts=2).strip()
-            src_split, tr_split = align_subs(current_src_lines[i], current_tr_lines[i], split_src)
-            return src_split, tr_split
+            split_src = split_sentence(src_lines[i], num_parts=2).strip()
+            src_lines[i], tr_lines[i] = align_subs(src_lines[i], tr_lines[i], split_src)
         
-        # 使用线程池并发处理需要分割的行
         with concurrent.futures.ThreadPoolExecutor(max_workers=load_key("max_workers")) as executor:
-            results = list(executor.map(process, to_split))
+            executor.map(process, to_split)
         
-        # 更新需要分割的行
-        for idx, (i, (src_split, tr_split)) in enumerate(zip(to_split, results)):
-            current_src_lines[i:i+1] = src_split
-            current_tr_lines[i:i+1] = tr_split
+        # Flatten `src_lines` and `tr_lines`
+        src_lines = [item for sublist in src_lines for item in (sublist if isinstance(sublist, list) else [sublist])]
+        tr_lines = [item for sublist in tr_lines for item in (sublist if isinstance(sublist, list) else [sublist])]
         
-        # 检查是否满足长度要求
-        if all(len(src) <= MAX_SUB_LENGTH for src in current_src_lines) and \
-           all(calc_len(tr) * TARGET_SUB_MULTIPLIER <= MAX_SUB_LENGTH for tr in current_tr_lines):
-            return current_src_lines, current_tr_lines
+        if all(len(src) <= MAX_SUB_LENGTH for src in src_lines) and all(calc_len(tr) * TARGET_SUB_MULTIPLIER <= MAX_SUB_LENGTH for tr in tr_lines):
+            break
     
-    return current_src_lines, current_tr_lines
+    return src_lines, tr_lines
 
 def split_for_sub_main():
     if os.path.exists("output/log/translation_results_for_subtitles.xlsx"):

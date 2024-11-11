@@ -43,12 +43,12 @@ def check_ask_gpt_history(prompt, model, log_title):
                     return item["response"]
     return False
 
-def ask_gpt(prompt, response_json=True, valid_def=None, log_title='default', skip_history=False):
+def ask_gpt(prompt, response_json=True, valid_def=None, log_title='default', re_try=False):
     api_set = load_key("api")
     llm_support_json = load_key("llm_support_json")
     with LOCK:
-        # 如果 skip_history 为 False，则检查历史记录
-        if not skip_history:
+        # 如果 re_try 为 False，则检查历史记录
+        if not re_try:
             history_response = check_ask_gpt_history(prompt, api_set["model"], log_title)
             if history_response:
                 return history_response
@@ -61,8 +61,8 @@ def ask_gpt(prompt, response_json=True, valid_def=None, log_title='default', ski
     base_url = api_set["base_url"]
     client = OpenAI(api_key=api_set["key"], base_url=base_url)
     
-    # 当 skip_history 为 True 时，强制使用 betterModel
-    models_to_try = [api_set["betterModel"]] if skip_history else [api_set["model"], api_set["betterModel"]]
+    # 当 re_try 为 True 时，强制使用 betterModel
+    models_to_try = [api_set["betterModel"]] if re_try else [api_set["model"], api_set["betterModel"]]
     
     for current_model in models_to_try:
         response_format = {"type": "json_object"} if response_json and current_model in llm_support_json else None

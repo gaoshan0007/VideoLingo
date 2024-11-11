@@ -75,7 +75,7 @@ def get_sentence_timestamps(df_words, df_sentences):
                 }
         
         # 提高匹配阈值，减少不准确的匹配
-        if best_match['score'] >= 0.8:  
+        if best_match['score'] >= 0.75:  
             time_stamp_list.append((best_match['start'], best_match['end']))
             
             console.print(f"✅ 匹配成功: 原句 {repr(sentence)}, 匹配短语 {repr(best_match['phrase'])}, 相似度 {best_match['score']:.2f}")
