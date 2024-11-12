@@ -1,4 +1,4 @@
-@echo off
+
 cd /d %~dp0..
 
 set HTTP_PROXY="http://127.0.0.1:4780"
