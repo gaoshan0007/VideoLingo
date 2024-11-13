@@ -58,67 +58,86 @@ def check_len_then_trim(text, duration):
     else:
         return text
 
-def pre_process_srt(subtitles):
+def pre_process_srt(df):
     """
     对字幕进行预处理，删除开始时间异常的字幕
     
     参数：
-    - subtitles: 包含字幕信息的列表
+    - df: 包含字幕信息的 DataFrame
     
     功能：
-    1. 比较相邻字幕的开始时间
-    2. 如果某个字幕的开始时间与前后字幕开始时间的差值大于10秒，则删除该字幕
+    1. 删除开始时间在结束时间之后的数据
+    2. 删除持续时间大于20秒的数据
+    3. 比较相邻字幕的开始时间
+    4. 如果某个字幕的开始时间与前后字幕开始时间的差值大于10秒，则删除该字幕
     
     返回：
-    - 处理后的字幕列表
+    - 处理后的 DataFrame
     """
     # 如果字幕数量少于3，无需处理
-    if len(subtitles) < 3:
-        return subtitles
+    if len(df) < 3:
+        return df
     
-    # 创建一个新的字幕列表，用于存储处理后的结果
-    processed_subtitles = []
+    # 创建一个布尔掩码，用于标记需要保留的字幕
+    mask = pd.Series([True] * len(df), index=df.index)
     
-    for i in range(len(subtitles)):
-        current_subtitle = subtitles[i]
-        current_start_time = datetime.datetime.combine(datetime.date.today(), current_subtitle['start_time'])
+    for i in range(len(df)):
+        # 将字符串时间转换为 datetime.time 对象
+        current_start_time = datetime.datetime.strptime(df.loc[i, 'start_time'], '%H:%M:%S.%f').time()
+        current_end_time = datetime.datetime.strptime(df.loc[i, 'end_time'], '%H:%M:%S.%f').time()
+        
+        # 使用 datetime.datetime.combine 将日期和时间组合
+        current_start_datetime = datetime.datetime.combine(datetime.date.today(), current_start_time)
+        current_end_datetime = datetime.datetime.combine(datetime.date.today(), current_end_time)
+        
+        # 删除开始时间在结束时间之后的数据
+        if df.loc[i, 'duration'] < 0:
+            rprint(f"[bold yellow]删除第 {df.loc[i, 'number']} 个字幕，开始时间在结束时间之后[/bold yellow]")
+            mask[i] = False
+            continue
+        
+        # 删除持续时间大于20秒的数据
+        if df.loc[i, 'duration'] > 20:
+            rprint(f"[bold yellow]删除第 {df.loc[i, 'number']} 个字幕，持续时间超过20秒[/bold yellow]")
+            mask[i] = False
+            continue
         
         # 对于第一个和最后一个字幕，只比较一侧
         if i == 0:
-            next_subtitle = subtitles[i + 1]
-            next_start_time = datetime.datetime.combine(datetime.date.today(), next_subtitle['start_time'])
+            next_start_time = datetime.datetime.strptime(df.loc[i+1, 'start_time'], '%H:%M:%S.%f').time()
+            next_start_datetime = datetime.datetime.combine(datetime.date.today(), next_start_time)
             
             # 如果当前字幕的开始时间比下一个字幕的开始时间大10秒
-            if (current_start_time - next_start_time).total_seconds() > 10:
-                rprint(f"[bold yellow]删除第 {current_subtitle['number']} 个字幕，开始时间异常[/bold yellow]")
+            if (current_start_datetime - next_start_datetime).total_seconds() > 10:
+                rprint(f"[bold yellow]删除第 {df.loc[i, 'number']} 个字幕，开始时间异常[/bold yellow]")
+                mask[i] = False
                 continue
-            processed_subtitles.append(current_subtitle)
         
-        elif i == len(subtitles) - 1:
-            prev_subtitle = subtitles[i - 1]
-            prev_start_time = datetime.datetime.combine(datetime.date.today(), prev_subtitle['start_time'])
+        elif i == len(df) - 1:
+            prev_start_time = datetime.datetime.strptime(df.loc[i-1, 'start_time'], '%H:%M:%S.%f').time()
+            prev_start_datetime = datetime.datetime.combine(datetime.date.today(), prev_start_time)
             
             # 如果当前字幕的开始时间比前一个字幕的开始时间大10秒
-            if (current_start_time - prev_start_time).total_seconds() > 10:
-                rprint(f"[bold yellow]删除第 {current_subtitle['number']} 个字幕，开始时间异常[/bold yellow]")
+            if (current_start_datetime - prev_start_datetime).total_seconds() > 10:
+                rprint(f"[bold yellow]删除第 {df.loc[i, 'number']} 个字幕，开始时间异常[/bold yellow]")
+                mask[i] = False
                 continue
-            processed_subtitles.append(current_subtitle)
         
         else:
-            prev_subtitle = subtitles[i - 1]
-            next_subtitle = subtitles[i + 1]
+            prev_start_time = datetime.datetime.strptime(df.loc[i-1, 'start_time'], '%H:%M:%S.%f').time()
+            next_start_time = datetime.datetime.strptime(df.loc[i+1, 'start_time'], '%H:%M:%S.%f').time()
             
-            prev_start_time = datetime.datetime.combine(datetime.date.today(), prev_subtitle['start_time'])
-            next_start_time = datetime.datetime.combine(datetime.date.today(), next_subtitle['start_time'])
+            prev_start_datetime = datetime.datetime.combine(datetime.date.today(), prev_start_time)
+            next_start_datetime = datetime.datetime.combine(datetime.date.today(), next_start_time)
             
             # 如果当前字幕的开始时间比前一个和下一个字幕的开始时间都大10秒
-            if (current_start_time - prev_start_time).total_seconds() > 10 and (current_start_time - next_start_time).total_seconds() > 10:
-                rprint(f"[bold yellow]删除第 {current_subtitle['number']} 个字幕，开始时间异常[/bold yellow]")
+            if (current_start_datetime - prev_start_datetime).total_seconds() > 10 and (current_start_datetime - next_start_datetime).total_seconds() > 10:
+                rprint(f"[bold yellow]删除第 {df.loc[i, 'number']} 个字幕，开始时间异常[/bold yellow]")
+                mask[i] = False
                 continue
-            
-            processed_subtitles.append(current_subtitle)
     
-    return processed_subtitles
+    # 根据掩码过滤 DataFrame
+    return df[mask].reset_index(drop=True)
 
 def process_srt():
     """
@@ -194,57 +213,58 @@ def process_srt():
         # 保存处理后的字幕信息
         subtitles.append({
             'number': number,
-            'start_time': start_time,
-            'end_time': end_time,
+            'start_time': start_time.strftime('%H:%M:%S.%f')[:-3],
+            'end_time': end_time.strftime('%H:%M:%S.%f')[:-3],
             'duration': duration,
             'text': text,
             'origin': origin
         })
     
-    # 预处理字幕，删除开始时间异常的字幕
-    subtitles = pre_process_srt(subtitles)
-    
     # 转换为 DataFrame
     df = pd.DataFrame(subtitles)
     
+    df = pre_process_srt(df)
     # 处理过短的字幕
     i = 0
     MIN_SUBTITLE_DURATION = load_key("min_subtitle_duration")
     while i < len(df):
         if df.loc[i, 'duration'] < MIN_SUBTITLE_DURATION:
             # 如果当前字幕和下一个字幕间隔太短，则合并
-            if i < len(df) - 1 and (datetime.datetime.combine(datetime.date.today(), df.loc[i+1, 'start_time']) - 
-                                    datetime.datetime.combine(datetime.date.today(), df.loc[i, 'start_time'])).total_seconds() < MIN_SUBTITLE_DURATION:
-                rprint(f"[bold yellow]Merging subtitles {i+1} and {i+2} -- duration: {df.loc[i, 'duration']}[/bold yellow]")
-                df.loc[i, 'text'] += ' ' + df.loc[i+1, 'text']
-                df.loc[i, 'origin'] += ' ' + df.loc[i+1, 'origin']
-                df.loc[i, 'end_time'] = df.loc[i+1, 'end_time']
-                df.loc[i, 'duration'] = (datetime.datetime.combine(datetime.date.today(), df.loc[i, 'end_time']) - 
-                                        datetime.datetime.combine(datetime.date.today(), df.loc[i, 'start_time'])).total_seconds()
-                df = df.drop(i+1).reset_index(drop=True)
+            if i < len(df) - 1:
+                next_start_datetime = datetime.datetime.strptime(df.loc[i+1, 'start_time'], '%H:%M:%S.%f')
+                current_start_datetime = datetime.datetime.strptime(df.loc[i, 'start_time'], '%H:%M:%S.%f')
+                
+                if (next_start_datetime - current_start_datetime).total_seconds() < MIN_SUBTITLE_DURATION:
+                    rprint(f"[bold yellow]Merging subtitles {i+1} and {i+2} -- duration: {df.loc[i, 'duration']}[/bold yellow]")
+                    df.loc[i, 'text'] += ' ' + df.loc[i+1, 'text']
+                    df.loc[i, 'origin'] += ' ' + df.loc[i+1, 'origin']
+                    df.loc[i, 'end_time'] = df.loc[i+1, 'end_time']
+                    df.loc[i, 'duration'] = (datetime.datetime.strptime(df.loc[i, 'end_time'], '%H:%M:%S.%f') - 
+                                            datetime.datetime.strptime(df.loc[i, 'start_time'], '%H:%M:%S.%f')).total_seconds()
+                    df = df.drop(i+1).reset_index(drop=True)
+                    continue
 
-                i=i+2 #修复把后面字幕全部删掉的BUG                
+            # 对于过短的字幕，尝试延长持续时间
+            if i < len(df) - 1:  # 不是最后一个字幕
+                rprint(f"[bold blue]Extending subtitle {i+1} duration to {MIN_SUBTITLE_DURATION} seconds[/bold blue]")
+                start_time = datetime.datetime.strptime(df.loc[i, 'start_time'], '%H:%M:%S.%f').time()
+                new_end_time = (datetime.datetime.combine(datetime.date.today(), start_time) + 
+                                datetime.timedelta(seconds=MIN_SUBTITLE_DURATION)).time()
+                df.loc[i, 'end_time'] = new_end_time.strftime('%H:%M:%S.%f')[:-3]
+                df.loc[i, 'duration'] = MIN_SUBTITLE_DURATION
             else:
-                # 对于过短的字幕，尝试延长持续时间
-                if i < len(df) - 1:  # 不是最后一个字幕
-                    rprint(f"[bold blue]Extending subtitle {i+1} duration to {MIN_SUBTITLE_DURATION} seconds[/bold blue]")
-                    df.loc[i, 'end_time'] = (datetime.datetime.combine(datetime.date.today(), df.loc[i, 'start_time']) + 
-                                            datetime.timedelta(seconds=MIN_SUBTITLE_DURATION)).time()
-                    df.loc[i, 'duration'] = MIN_SUBTITLE_DURATION
-                else:
-                    # 最后一个字幕不延长
-                    rprint(f"[bold red]The last subtitle {i+1} duration is less than {MIN_SUBTITLE_DURATION} seconds, but not extending[/bold red]")
-                i += 1
+                # 最后一个字幕不延长
+                rprint(f"[bold red]The last subtitle {i+1} duration is less than {MIN_SUBTITLE_DURATION} seconds, but not extending[/bold red]")
+            i += 1
         else:
             i += 1
-    
-    # 格式化时间戳
-    df['start_time'] = df['start_time'].apply(lambda x: x.strftime('%H:%M:%S.%f')[:-3])
-    df['end_time'] = df['end_time'].apply(lambda x: x.strftime('%H:%M:%S.%f')[:-3])
     
     # 检查并修剪字幕长度，执行两次以确保字幕长度在限制范围内
     for _ in range(2):
         df['text'] = df.apply(lambda x: check_len_then_trim(x['text'], x['duration']), axis=1)
+
+    # 最后预处理字幕，删除开始时间异常的字幕
+    df = pre_process_srt(df)
 
     return df
 

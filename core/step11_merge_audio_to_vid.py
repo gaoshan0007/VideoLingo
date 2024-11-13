@@ -35,6 +35,7 @@ def merge_all_audio():
 
     prev_target_start_time = None
     prev_actual_duration = 0
+    current_merged_duration = 0
     
     for index, row in df.iterrows():
         number = row['number']
@@ -49,13 +50,29 @@ def merge_all_audio():
         actual_duration = len(audio_segment) / 1000  # Convert to seconds
         target_start_time = time_to_datetime(start_time)
         
-        silence_duration = (target_start_time - datetime(1900, 1, 1)).total_seconds() if prev_target_start_time is None else (target_start_time - prev_target_start_time).total_seconds() - prev_actual_duration
+        # 计算预期的开始时间
+        expected_start_time = (target_start_time - datetime(1900, 1, 1)).total_seconds()
         
-        if silence_duration > 0:
-            silence = AudioSegment.silent(duration=int(silence_duration * 1000), frame_rate=sample_rate)
-            merged_audio += silence
+        # 检查当前合并音频的持续时间是否与预期开始时间一致
+        time_difference = abs(current_merged_duration - expected_start_time)
         
+        if time_difference > 3:  # 如果时间相差超过2秒
+            rprint(f"[bold yellow]Warning: 音频片段 {number} 的开始时间与当前合并音频时间相差 {time_difference:.2f} 秒，进行时间对齐[/bold yellow]")
+            
+            if current_merged_duration < expected_start_time:
+                # 如果当前合并音频时间短于预期，添加静音
+                silence_duration = expected_start_time - current_merged_duration
+                silence = AudioSegment.silent(duration=int(silence_duration * 1000), frame_rate=sample_rate)
+                merged_audio += silence
+                current_merged_duration += silence_duration
+            else:
+                # 如果当前合并音频时间长于预期，截断音频
+                merged_audio = merged_audio[:int(expected_start_time * 1000)]
+                current_merged_duration = expected_start_time
+        
+        # 添加当前音频片段
         merged_audio += audio_segment
+        current_merged_duration += actual_duration
         
         prev_target_start_time = target_start_time
         prev_actual_duration = actual_duration
