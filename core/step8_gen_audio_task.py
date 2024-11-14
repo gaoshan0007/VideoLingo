@@ -44,8 +44,16 @@ def check_len_then_trim(text, duration):
         original_text = text
         prompt = get_subtitle_trim_prompt(text, duration)
         def valid_trim(response):
-            if 'trans_text_processed' not in response:
-                return {'status': 'error', 'message': 'No trans_text_processed in response'}
+            # 严格校验 JSON 结构
+            if not isinstance(response, dict):
+                return {'status': 'error', 'message': '返回必须是一个字典'}
+            
+            if 'analysis' not in response or not isinstance(response['analysis'], str) or not response['analysis'].strip():
+                return {'status': 'error', 'message': '必须包含非空的 analysis 字段'}
+            
+            if 'trans_text_processed' not in response or not isinstance(response['trans_text_processed'], str) or not response['trans_text_processed'].strip():
+                return {'status': 'error', 'message': '必须包含非空的 trans_text_processed 字段'}
+            
             return {'status': 'success', 'message': ''}
         try:    
             response = ask_gpt(prompt, response_json=True, log_title='subtitle_trim', valid_def=valid_trim)
@@ -58,6 +66,7 @@ def check_len_then_trim(text, duration):
     else:
         return text
 
+# 其余代码保持不变
 def pre_process_srt(df):
     """
     对字幕进行预处理，删除开始时间异常的字幕

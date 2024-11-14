@@ -37,13 +37,82 @@ def align_subs(src_sub: str, tr_sub: str, src_part: str) -> Tuple[List[str], Lis
     align_prompt = get_align_prompt(src_sub, tr_sub, src_part)
     
     def valid_align(response_data):
-        if 'best' not in response_data:
-            return {"status": "error", "message": "Missing required key: `best`"}
+        # 严格校验返回的 JSON 数据
+        required_keys = ["analysis", "align_1", "align_2", "comparison", "best"]
+        
+        # 检查所有必需的键是否存在
+        for key in required_keys:
+            if key not in response_data:
+                return {
+                    "status": "error", 
+                    "message": f"缺少必需的键: `{key}`"
+                }
+        
+        # 检查 analysis 和 comparison 是否为非空字符串
+        for key in ["analysis", "comparison"]:
+            if not isinstance(response_data[key], str) or not response_data[key].strip():
+                return {
+                    "status": "error", 
+                    "message": f"键 `{key}` 必须是非空字符串"
+                }
+        
+        # 检查 align_1 和 align_2 的结构
+        for align_key in ["align_1", "align_2"]:
+            if not isinstance(response_data[align_key], list):
+                return {
+                    "status": "error", 
+                    "message": f"键 `{align_key}` 必须是列表"
+                }
+            
+            for item in response_data[align_key]:
+                if not isinstance(item, dict):
+                    return {
+                        "status": "error", 
+                        "message": f"键 `{align_key}` 的每个元素必须是字典"
+                    }
+                
+                # 检查每个对齐项是否包含 src_part_1 和 target_part_1 中的至少一个
+                src_part_keys = [f"src_part_1", f"src_part_2"]
+                target_part_keys = [f"target_part_1", f"target_part_2"]
+                
+                if not any(key in item for key in src_part_keys):
+                    return {
+                        "status": "error", 
+                        "message": "对齐项缺少 `src_part_1` 或 `src_part_2`"
+                    }
+                
+                if not any(key in item for key in target_part_keys):
+                    return {
+                        "status": "error", 
+                        "message": "对齐项缺少 `target_part_1` 或 `target_part_2`"
+                    }
+                
+                # 检查存在的部分是否为字符串
+                for part_key in src_part_keys + target_part_keys:
+                    if part_key in item and not isinstance(item[part_key], str):
+                        return {
+                            "status": "error", 
+                            "message": f"`{part_key}` 必须是字符串"
+                        }
+        
+        # 检查 best 是否为有效值
+        if not (
+            (isinstance(response_data['best'], int) and response_data['best'] in [1, 2]) or 
+            (isinstance(response_data['best'], str) and response_data['best'] in ["1", "2"])
+        ):
+            return {
+                "status": "error", 
+                "message": "`best` 必须是 1、2、'1' 或 '2'"
+            }
+        
         return {"status": "success", "message": "Align completed"}
 
     parsed = ask_gpt(align_prompt, response_json=True, valid_def=valid_align, log_title='align_subs')
     
-    align_data = parsed['align']
+    # 转换 best 为整数
+    best = int(parsed['best']) if isinstance(parsed['best'], str) else parsed['best']
+    align_data = parsed[f'align_{best}']
+    
     src_parts = src_part.split('\n')
     tr_parts = [item[f'target_part_{i+1}'].strip() for i, item in enumerate(align_data)]
     

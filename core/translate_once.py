@@ -22,15 +22,60 @@ def valid_translate_result(result: dict, required_keys: list, required_sub_keys:
 
     return {"status": "success", "message": "Translation completed"}
 
+def valid_faith(response_data):
+    # 严格校验返回数据的格式
+    if not isinstance(response_data, dict):
+        return {"status": "error", "message": "返回数据必须是字典"}
+    
+    # 检查键是否为连续的字符串数字
+    keys = list(response_data.keys())
+    if not all(str(i) in keys for i in range(1, len(keys) + 1)):
+        return {"status": "error", "message": "键必须是连续的字符串数字，如 '1', '2', '3'"}
+    
+    # 检查每个值的格式
+    for key, value in response_data.items():
+        if not isinstance(value, dict):
+            return {"status": "error", "message": f"键 {key} 的值必须是字典"}
+        
+        if set(value.keys()) != {"origin", "direct"}:
+            return {"status": "error", "message": f"键 {key} 的值必须包含且仅包含 'origin' 和 'direct' 两个键"}
+        
+        if not all(isinstance(v, str) for v in value.values()):
+            return {"status": "error", "message": f"键 {key} 的 'origin' 和 'direct' 值必须是字符串"}
+    
+    return {"status": "success", "message": "Translation completed"}
+
+def valid_express(response_data):
+    # 严格校验返回数据的格式
+    if not isinstance(response_data, dict):
+        return {"status": "error", "message": "返回数据必须是字典"}
+    
+    # 检查键是否为连续的字符串数字
+    keys = list(response_data.keys())
+    if not all(str(i) in keys for i in range(1, len(keys) + 1)):
+        return {"status": "error", "message": "键必须是连续的字符串数字，如 '1', '2', '3'"}
+    
+    # 检查每个值的格式
+    for key, value in response_data.items():
+        if not isinstance(value, dict):
+            return {"status": "error", "message": f"键 {key} 的值必须是字典"}
+        
+        # 检查是否包含且仅包含这四个键
+        if set(value.keys()) != {"origin", "direct", "reflection", "free"}:
+            return {"status": "error", "message": f"键 {key} 的值必须包含且仅包含 'origin', 'direct', 'reflection', 'free' 四个键"}
+        
+        # 检查所有值是否为字符串
+        if not all(isinstance(v, str) for v in value.values()):
+            return {"status": "error", "message": f"键 {key} 的所有值必须是字符串"}
+    
+    return {"status": "success", "message": "Translation completed"}
+
 def translate_lines(lines, previous_content_prompt, after_cotent_prompt, things_to_note_prompt, summary_prompt, index = 0):
     shared_prompt = generate_shared_prompt(previous_content_prompt, after_cotent_prompt, summary_prompt, things_to_note_prompt)
 
     # Retry translation if the length of the original text and the translated text are not the same, or if the specified key is missing
     def retry_translation(prompt, step_name):
-        def valid_faith(response_data):
-            return valid_translate_result(response_data, ['1'], ['direct'])
-        def valid_express(response_data):
-            return valid_translate_result(response_data, ['1'], ['free'])
+        
         for retry in range(5):
             if step_name == 'faithfulness':
                 result = ask_gpt(prompt, response_json=True, valid_def=valid_faith, log_title=f'translate_{step_name}', re_try = retry!=1)
