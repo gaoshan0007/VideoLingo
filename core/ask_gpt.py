@@ -43,69 +43,110 @@ def check_ask_gpt_history(prompt, model, log_title):
                     return item["response"]
     return False
 
-def ask_gpt(prompt, response_json=True, valid_def=None, log_title='default', re_try=False):
-    api_set = load_key("api")
+def ask_gpt(prompt, response_json=True, valid_def=None, log_title='default', re_try=False, **kwargs):
+    # 获取所有 API 配置
+    apis = load_key("apis")
     llm_support_json = load_key("llm_support_json")
+    
     with LOCK:
         # 如果 re_try 为 False，则检查历史记录
         if not re_try:
-            history_response = check_ask_gpt_history(prompt, api_set["model"], log_title)
+            # 使用第一个 API 的模型检查历史记录
+            first_api = apis.get("api1", {})
+            history_response = check_ask_gpt_history(prompt, first_api.get("model", ""), log_title)
             if history_response:
                 return history_response
     
-    if not api_set["key"]:
-        raise ValueError(f"⚠️API_KEY is missing")
+    # 如果没有 API 配置，抛出异常
+    if not apis:
+        raise ValueError("⚠️No API configurations found")
     
     messages = [{"role": "user", "content": prompt}]
     
-    base_url = api_set["base_url"]
-    client = OpenAI(api_key=api_set["key"], base_url=base_url)
+    # 存储最后一次的异常，以便在所有 API 都失败时抛出
+    last_exception = None
     
-    # 当 re_try 为 True 时，强制使用 betterModel
-    models_to_try = [api_set["betterModel"]] if re_try else [api_set["model"], api_set["betterModel"]]
-    
-    for current_model in models_to_try:
-        response_format = {"type": "json_object"} if response_json and current_model in llm_support_json else None
-
+    # 遍历所有 API 配置
+    for api_name, api_config in apis.items():
+        # 如果 API 配置不完整，跳过
+        if not api_config.get("key") or not api_config.get("base_url") or not api_config.get("model"):
+            print(f"Skipping incomplete API configuration: {api_name}")
+            continue
+        
         try:
+            # 使用当前 API 配置
+            client = OpenAI(
+                api_key=api_config.get("key"), 
+                base_url=api_config.get("base_url")
+            )
+            
+            # 确定是否使用 JSON 响应格式
+            response_format = {"type": "json_object"} if response_json and api_config.get("model") in llm_support_json else None
+            
+            # 尝试获取响应
             response = client.chat.completions.create(
-                model=current_model,
+                model=api_config.get("model"),
                 messages=messages,
                 response_format=response_format,
-                timeout=150 #! set timeout                
+                timeout=150
             )
-            #print(f"current_model-------------------------{current_model}--------------------------")
+            
+            # 解析响应
             if response_json:
                 try:
                     response_data = json_repair.loads(response.choices[0].message.content)
                     
-                    # check if the response is valid, otherwise save the log and raise error and retry
+                    # 如果定义了验证函数，进行验证
                     if valid_def:
                         valid_response = valid_def(response_data)
                         if valid_response['status'] != 'success':
-                            save_log(current_model, prompt, response_data, log_title="error", message=valid_response['message'])
-                            raise ValueError(f"❎ API response error: {valid_response['message']}")
-                        
-                    break  # Successfully accessed and parsed, break the loop
-                except Exception as e:                    
-                    print(f"❎ json_repair parsing failed. Retrying: Attempting to switch to next model... '''{response_data}'''")
-                    save_log(current_model, prompt, response_data, log_title="error", message=f"json_repair parsing failed.")
-        
+                            save_log(
+                                api_config.get("model"), 
+                                prompt, 
+                                response_data, 
+                                log_title="error", 
+                                message=valid_response['message']
+                            )
+                            # 如果验证失败，继续尝试下一个 API
+                            continue
+                    
+                    # 成功获取并验证响应，保存日志并返回
+                    with LOCK:
+                        if log_title != 'None':
+                            save_log(
+                                api_config.get("model"), 
+                                prompt, 
+                                response_data, 
+                                log_title=log_title
+                            )
+                    
+                    return response_data
                 
+                except Exception as e:
+                    # JSON 解析或验证失败
+                    print(f"❎ Error parsing response from {api_name}: {e}")
+                    save_log(
+                        api_config.get("model"), 
+                        prompt, 
+                        str(e), 
+                        log_title="error", 
+                        message="JSON parsing or validation failed"
+                    )
+                    last_exception = e
+                    continue
+        
         except Exception as e:
-            # 如果是第一个模型出错，尝试切换到下一个模型
-            if current_model == models_to_try[0]:
-                print(f"Error with model {current_model}: {e}. Attempting to switch to next model...")
-                continue
-            else:
-                # 如果最后一个模型也失败，则抛出异常
-                raise Exception(f"Failed after trying all models: {e}")
-
-    with LOCK:
-        if log_title != 'None':
-            save_log(current_model, prompt, response_data, log_title=log_title)
-
-    return response_data
+            # API 调用失败
+            print(f"❎ Error with API {api_name}: {e}")
+            last_exception = e
+            continue
+    
+    # 如果所有 API 都失败，抛出最后一个异常
+    if last_exception:
+        raise Exception(f"Failed after trying all API configurations: {last_exception}")
+    
+    # 如果没有任何可用的 API 配置
+    raise ValueError("No valid API configurations found")
 
 
 if __name__ == '__main__':

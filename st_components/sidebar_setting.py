@@ -6,27 +6,68 @@ from core.config_utils import update_key, load_key
 import requests
 
 def page_setting():
-    with st.expander("LLM Configuration", expanded=True):
-        api_key = st.text_input("API_KEY", value=load_key("api.key"))
-        if api_key != load_key("api.key"):
-            update_key("api.key", api_key)
+    # 使用 session_state 来管理 API 配置的动态变化
+    if 'apis_modified' not in st.session_state:
+        st.session_state.apis_modified = False
 
-        selected_base_url = st.text_input("BASE_URL", value=load_key("api.base_url"), help="Base URL for API requests")
-        if selected_base_url != load_key("api.base_url"):
-            update_key("api.base_url", selected_base_url)
+    with st.expander("LLM Configuration", expanded=True):
+        # 显示现有的 API 配置列表
+        apis = load_key("apis")
+        api_names = list(apis.keys())
+        
+        # 选择当前活跃的 API
+        selected_api = st.selectbox("选择 API 配置", options=api_names)
+        
+        # 添加新的 API 配置按钮
+        if st.button("➕ 添加新 API 配置"):
+            new_api_name = f"api{len(api_names) + 1}"
+            apis[new_api_name] = {
+                "key": "",
+                "base_url": "",
+                "model": ""
+            }
+            update_key("apis", apis)
+            st.session_state.apis_modified = True
+            st.rerun()
+        
+        # 当前选中的 API 配置
+        current_api = apis[selected_api]
+        
+        # API 配置输入
+        api_key = st.text_input(f"API_KEY ({selected_api})", value=current_api.get("key", ""))
+        if api_key != current_api.get("key", ""):
+            apis[selected_api]["key"] = api_key
+            update_key("apis", apis)
+            st.session_state.apis_modified = True
+
+        selected_base_url = st.text_input(f"BASE_URL ({selected_api})", value=current_api.get("base_url", ""), help="Base URL for API requests")
+        if selected_base_url != current_api.get("base_url", ""):
+            apis[selected_api]["base_url"] = selected_base_url
+            update_key("apis", apis)
+            st.session_state.apis_modified = True
 
         col1, col2 = st.columns([4, 1])
         with col1:
-            model = st.text_input("MODEL", value=load_key("api.model"))
-            if model and model != load_key("api.model"):
-                update_key("api.model", model)
+            model = st.text_input(f"MODEL ({selected_api})", value=current_api.get("model", ""))
+            if model and model != current_api.get("model", ""):
+                apis[selected_api]["model"] = model
+                update_key("apis", apis)
+                st.session_state.apis_modified = True
         with col2:
             if st.button("📡", key="api"):
-                if valid_llm_api():
+                if valid_llm_api(current_api):
                     st.toast("API Key is valid", icon="✅")
                 else:
                     st.toast("API Key is invalid", icon="❌")
+        
+        # 删除 API 配置按钮（如果不是第一个 API）
+        if selected_api != "api1" and st.button(f"🗑️ 删除 {selected_api} 配置"):
+            del apis[selected_api]
+            update_key("apis", apis)
+            st.session_state.apis_modified = True
+            st.rerun()
     
+    # 其余部分保持不变
     with st.expander("Transcription and Subtitle Settings", expanded=True):
         whisper_method_options = ["whisperX 💻", "whisperX ☁️"]
         whisper_method_mapping = {"whisperX 💻": "whisperx", "whisperX ☁️": "whisperxapi"}
@@ -94,6 +135,7 @@ def page_setting():
         if resolution != load_key("resolution"):
             update_key("resolution", resolution)
         
+    # 其余部分保持不变
     with st.expander("Dubbing Settings", expanded=False):
         tts_methods = ["openai_tts", "azure_tts", "gpt_sovits", "fish_tts"]
         selected_tts_method = st.selectbox("TTS Method", options=tts_methods, index=tts_methods.index(load_key("tts_method")))
@@ -162,9 +204,14 @@ def page_setting():
         if original_volume_options[selected_original_volume] != load_key("original_volume"):
             update_key("original_volume", original_volume_options[selected_original_volume])
 
-def valid_llm_api():
+def valid_llm_api(api_config):
     try:
-        response = ask_gpt("This is a test, response 'message':'success' in json format.", response_json=True, log_title='None')
+        response = ask_gpt("This is a test, response 'message':'success' in json format.", 
+                           response_json=True, 
+                           log_title='None', 
+                           api_key=api_config.get('key'), 
+                           base_url=api_config.get('base_url'), 
+                           model=api_config.get('model'))
         return response.get('message') == 'success'
     except Exception:
         return False

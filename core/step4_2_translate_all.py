@@ -56,11 +56,17 @@ def translate_all():
         return
     
     console.print("[bold green]Start Translating All...[/bold green]")
-    if 'sonnet' in load_key("api.model"):
+    
+    # 获取第一个 API 配置的模型
+    apis = load_key("apis")
+    first_api_model = apis.get("api1", {}).get("model", "")
+    
+    if 'sonnet' in first_api_model:
         chunks = split_chunks_by_chars()
     else:
         console.print("[yellow]🚨 Not using sonnet, using smaller chunk size and max_i to avoid OOM[/yellow]")
         chunks = split_chunks_by_chars(chunk_size=400, max_i=8)
+    
     with open('output/log/terminology.json', 'r', encoding='utf-8') as file:
         theme_prompt = json.load(file).get('theme')
 
