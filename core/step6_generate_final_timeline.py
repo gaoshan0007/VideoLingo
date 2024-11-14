@@ -6,6 +6,7 @@ import re
 from core.config_utils import load_key, get_joiner
 from rich.panel import Panel
 from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
 import autocorrect_py as autocorrect
 import json
 
@@ -35,64 +36,78 @@ def get_sentence_timestamps(df_words, df_sentences):
     language = load_key("whisper.detected_language") if whisper_language == 'auto' else whisper_language
     joiner = get_joiner(language)
 
-    for idx, sentence in df_sentences['Source'].items():
-        # 特殊处理：单个字母的句子直接返回原文的时间戳
-        if len(remove_punctuation(sentence)) <= 1:
-            time_stamp_list.append((float(df_words['start'][0]), float(df_words['end'][0])))
-            continue
+    # 使用 rich 进度条
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TimeRemainingColumn(),
+        transient=True
+    ) as progress:
+        task = progress.add_task("[cyan]匹配句子时间戳", total=len(df_sentences))
 
-        sentence = remove_punctuation(sentence.lower())
-        best_match = {'score': 0, 'start': 0, 'end': 0, 'word_count': 0, 'phrase': ''}
-        
-        # 更严格的滑动窗口策略
-        window_size = max(len(sentence.split()) + 1, 3)  # 减小窗口大小
-        
-        for start_index in range(len(df_words) - window_size + 1):
-            current_phrase = ""
-            current_start_time = float(df_words['start'][start_index])
-            current_end_time = float(df_words['end'][start_index + window_size - 1])
+        for idx, sentence in df_sentences['Source'].items():
+            # 特殊处理：单个字母的句子直接返回原文的时间戳
+            if len(remove_punctuation(sentence)) <= 1:
+                time_stamp_list.append((float(df_words['start'][0]), float(df_words['end'][0])))
+                progress.update(task, advance=1)
+                continue
+
+            sentence = remove_punctuation(sentence.lower())
+            best_match = {'score': 0, 'start': 0, 'end': 0, 'word_count': 0, 'phrase': ''}
             
-            # 构建窗口内的短语
-            for j in range(start_index, start_index + window_size):
-                word = remove_punctuation(df_words['text'][j].lower())
-                current_phrase += word + joiner
+            # 更严格的滑动窗口策略，减小窗口大小
+            window_size = max(min(len(sentence.split()) + 1, 5), 3)  # 限制窗口大小在 3-5 之间
             
-            current_phrase = current_phrase.strip()
+            for start_index in range(len(df_words) - window_size + 1):
+                current_phrase = ""
+                current_start_time = float(df_words['start'][start_index])
+                current_end_time = float(df_words['end'][start_index + window_size - 1])
+                
+                # 构建窗口内的短语
+                for j in range(start_index, start_index + window_size):
+                    word = remove_punctuation(df_words['text'][j].lower())
+                    current_phrase += word + joiner
+                
+                current_phrase = current_phrase.strip()
+                
+                # 计算相似度，增加对短语长度的惩罚
+                similarity = SequenceMatcher(None, sentence, current_phrase).ratio()
+                length_penalty = min(1, len(sentence) / len(current_phrase))
+                adjusted_similarity = similarity * length_penalty
+                
+                # 更新最佳匹配
+                if adjusted_similarity > best_match['score']:
+                    best_match = {
+                        'score': adjusted_similarity,
+                        'start': current_start_time,
+                        'end': current_end_time,
+                        'word_count': window_size,
+                        'phrase': current_phrase
+                    }
             
-            # 计算相似度，增加对短语长度的惩罚
-            similarity = SequenceMatcher(None, sentence, current_phrase).ratio()
-            length_penalty = min(1, len(sentence) / len(current_phrase))
-            adjusted_similarity = similarity * length_penalty
-            
-            # 更新最佳匹配
-            if adjusted_similarity > best_match['score']:
-                best_match = {
-                    'score': adjusted_similarity,
-                    'start': current_start_time,
-                    'end': current_end_time,
-                    'word_count': window_size,
-                    'phrase': current_phrase
-                }
-        
-        # 提高匹配阈值，减少不准确的匹配
-        if best_match['score'] >= 0.75:  
-            time_stamp_list.append((best_match['start'], best_match['end']))
-            
-            console.print(f"✅ 匹配成功: 原句 {repr(sentence)}, 匹配短语 {repr(best_match['phrase'])}, 相似度 {best_match['score']:.2f}")
-        else:
-            console.print(f"❌ 匹配失败: 原句 {repr(sentence)}, 匹配短语 {repr(best_match['phrase'])}, 相似度 {best_match['score']:.2f}")
-            
-            # 如果匹配失败，尝试使用最佳匹配的时间戳
-            if best_match['score'] > 0:
+            # 提高匹配阈值，减少不准确的匹配
+            if best_match['score'] >= 0.75:  
                 time_stamp_list.append((best_match['start'], best_match['end']))
+                
+                console.print(f"✅ 匹配成功: 原句 {repr(sentence)}, 匹配短语 {repr(best_match['phrase'])}, 相似度 {best_match['score']:.2f}")
             else:
-                # 将 DataFrame 以 JSON 格式写入 log.txt
-                with open('output/log/sentences_log.json', 'w', encoding='utf-8') as f:
-                    json.dump(df_sentences.to_dict(orient='records'), f, ensure_ascii=False, indent=2)
-                raise ValueError(f"❎ 无法匹配句子时间戳：{sentence}。可能是由于背景音乐太大或语言检测不准确。目前无法自动处理，请提交问题报告！")
+                console.print(f"❌ 匹配失败: 原句 {repr(sentence)}, 匹配短语 {repr(best_match['phrase'])}, 相似度 {best_match['score']:.2f}")
+                
+                # 如果匹配失败，尝试使用最佳匹配的时间戳
+                if best_match['score'] > 0:
+                    time_stamp_list.append((best_match['start'], best_match['end']))
+                else:
+                    # 将 DataFrame 以 JSON 格式写入 log.txt
+                    with open('output/log/sentences_log.json', 'w', encoding='utf-8') as f:
+                        json.dump(df_sentences.to_dict(orient='records'), f, ensure_ascii=False, indent=2)
+                    raise ValueError(f"❎ 无法匹配句子时间戳：{sentence}。可能是由于背景音乐太大或语言检测不准确。目前无法自动处理，请提交问题报告！")
+            
+            progress.update(task, advance=1)
     
     return time_stamp_list
 
+# 其余代码保持不变
 def align_timestamp(df_text, df_translate, subtitle_output_configs: list, output_dir: str, for_display: bool = True):
     """Align timestamps and add a new timestamp column to df_translate"""
     df_trans_time = df_translate.copy()

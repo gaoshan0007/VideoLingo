@@ -9,6 +9,7 @@ from core.spacy_utils.load_nlp_model import init_nlp
 from core.config_utils import load_key, get_joiner
 from rich.console import Console
 from rich.table import Table
+import re
 
 console = Console()
 
@@ -49,15 +50,59 @@ def find_split_positions(original, modified):
 
     return split_positions
 
+def extract_best_number(best_value):
+    """
+    从字符串中提取数字。
+    如果是数字直接返回，如果是描述性文本，尝试提取 1 或 2。
+    """
+    if isinstance(best_value, (int, float)):
+        return int(best_value)
+    
+    if isinstance(best_value, str):
+        # 尝试直接转换为数字
+        try:
+            return int(best_value)
+        except ValueError:
+            # 如果无法直接转换，尝试从文本中提取数字
+            match = re.search(r'[12]', best_value)
+            if match:
+                return int(match.group())
+    
+    # 如果无法确定，默认返回 1
+    console.print(f"[yellow]Warning: Could not determine best split. Defaulting to 1.[/yellow]")
+    return 1
+
 def split_sentence(sentence, num_parts, word_limit=18, index=-1, retry_attempt=0):
     """Split a long sentence using GPT and return the result as a string."""
     split_prompt = get_split_prompt(sentence, num_parts, word_limit)
     def valid_split(response_data):
-        if 'best' not in response_data:
-            return {"status": "error", "message": "Missing required key: `best`"}
+        # 严格校验返回的 JSON 数据
+        required_keys = ["analysis", "split_1", "split_2", "eval", "best"]
+        
+        # 检查所有必需的键是否存在
+        for key in required_keys:
+            if key not in response_data:
+                return {
+                    "status": "error", 
+                    "message": f"缺少必需的键: `{key}`"
+                }
+        
+        # 检查每个键的值是否为非空字符串（除了 best）
+        for key in ["analysis", "split_1", "split_2", "eval"]:
+            if not isinstance(response_data[key], str) or not response_data[key].strip():
+                return {
+                    "status": "error", 
+                    "message": f"键 `{key}` 必须是非空字符串"
+                }
+        
         return {"status": "success", "message": "Split completed"}
+    
     response_data = ask_gpt(split_prompt + ' ' * retry_attempt, response_json=True, valid_def=valid_split, log_title='sentence_splitbymeaning')
-    best_split = response_data[f"split_{response_data['best']}"]
+    
+    # 使用新的提取方法获取 best 值
+    best = extract_best_number(response_data['best'])
+    best_split = response_data[f"split_{best}"]
+    
     split_points = find_split_positions(sentence, best_split)
     # split the sentence based on the split points
     for i, split_point in enumerate(split_points):
