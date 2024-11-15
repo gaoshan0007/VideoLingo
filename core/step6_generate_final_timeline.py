@@ -1,16 +1,31 @@
 import pandas as pd
 import os, sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from difflib import SequenceMatcher
 import re
-from core.config_utils import load_key, get_joiner
 from rich.panel import Panel
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
 import autocorrect_py as autocorrect
-import json
 
 console = Console()
+
+CLEANED_CHUNKS_FILE = 'output/log/cleaned_chunks.xlsx'
+TRANSLATION_RESULTS_FOR_SUBTITLES_FILE = 'output/log/translation_results_for_subtitles.xlsx'
+TRANSLATION_RESULTS_REMERGED_FILE = 'output/log/translation_results_remerged.xlsx'
+
+OUTPUT_DIR = 'output'
+AUDIO_OUTPUT_DIR = 'output/audio'
+
+SUBTITLE_OUTPUT_CONFIGS = [ 
+    ('src.srt', ['Source']),
+    ('trans.srt', ['Translation']),
+    ('src_trans.srt', ['Source', 'Translation']),
+    ('trans_src.srt', ['Translation', 'Source'])
+]
+
+AUDIO_SUBTITLE_OUTPUT_CONFIGS = [
+    ('src_subs_for_audio.srt', ['Source']),
+    ('trans_subs_for_audio.srt', ['Translation'])
+]
 
 def convert_to_srt_format(start_time, end_time):
     """Convert time (in seconds) to the format: hours:minutes:seconds,milliseconds"""
@@ -30,84 +45,68 @@ def remove_punctuation(text):
     text = re.sub(r'[^\w\s]', '', text)
     return text.strip()
 
+def show_difference(str1, str2):
+    """Show the difference positions between two strings"""
+    min_len = min(len(str1), len(str2))
+    diff_positions = []
+    
+    for i in range(min_len):
+        if str1[i] != str2[i]:
+            diff_positions.append(i)
+    
+    if len(str1) != len(str2):
+        diff_positions.extend(range(min_len, max(len(str1), len(str2))))
+    
+    print("Difference positions:")
+    print(f"Expected sentence: {str1}")
+    print(f"Actual match: {str2}")
+    print("Position markers: " + "".join("^" if i in diff_positions else " " for i in range(max(len(str1), len(str2)))))
+    print(f"Difference indices: {diff_positions}")
+
 def get_sentence_timestamps(df_words, df_sentences):
     time_stamp_list = []
-    whisper_language = load_key("whisper.language")
-    language = load_key("whisper.detected_language") if whisper_language == 'auto' else whisper_language
-    joiner = get_joiner(language)
-
-    # 使用 rich 进度条
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TimeRemainingColumn(),
-        transient=True
-    ) as progress:
-        task = progress.add_task("[cyan]匹配句子时间戳", total=len(df_sentences))
-
-        for idx, sentence in df_sentences['Source'].items():
-            # 特殊处理：单个字母的句子直接返回原文的时间戳
-            if len(remove_punctuation(sentence)) <= 1:
-                time_stamp_list.append((float(df_words['start'][0]), float(df_words['end'][0])))
-                progress.update(task, advance=1)
-                continue
-
-            sentence = remove_punctuation(sentence.lower())
-            best_match = {'score': 0, 'start': 0, 'end': 0, 'word_count': 0, 'phrase': ''}
+    
+    # Build complete string and position mapping
+    full_words_str = ''
+    position_to_word_idx = {}
+    
+    for idx, word in enumerate(df_words['text']):
+        clean_word = remove_punctuation(word.lower())
+        start_pos = len(full_words_str)
+        full_words_str += clean_word
+        for pos in range(start_pos, len(full_words_str)):
+            position_to_word_idx[pos] = idx
+    
+    current_pos = 0
+    for idx, sentence in df_sentences['Source'].items():
+        clean_sentence = remove_punctuation(sentence.lower()).replace(" ", "")
+        sentence_len = len(clean_sentence)
+        
+        match_found = False
+        while current_pos <= len(full_words_str) - sentence_len:
+            if full_words_str[current_pos:current_pos+sentence_len] == clean_sentence:
+                start_word_idx = position_to_word_idx[current_pos]
+                end_word_idx = position_to_word_idx[current_pos + sentence_len - 1]
+                
+                time_stamp_list.append((
+                    float(df_words['start'][start_word_idx]),
+                    float(df_words['end'][end_word_idx])
+                ))
+                
+                current_pos += sentence_len
+                match_found = True
+                break
+            current_pos += 1
             
-            # 更严格的滑动窗口策略，减小窗口大小
-            window_size = max(min(len(sentence.split()) + 1, 5), 3)  # 限制窗口大小在 3-5 之间
-            
-            for start_index in range(len(df_words) - window_size + 1):
-                current_phrase = ""
-                current_start_time = float(df_words['start'][start_index])
-                current_end_time = float(df_words['end'][start_index + window_size - 1])
-                
-                # 构建窗口内的短语
-                for j in range(start_index, start_index + window_size):
-                    word = remove_punctuation(df_words['text'][j].lower())
-                    current_phrase += word + joiner
-                
-                current_phrase = current_phrase.strip()
-                
-                # 计算相似度，增加对短语长度的惩罚
-                similarity = SequenceMatcher(None, sentence, current_phrase).ratio()
-                length_penalty = min(1, len(sentence) / len(current_phrase))
-                adjusted_similarity = similarity * length_penalty
-                
-                # 更新最佳匹配
-                if adjusted_similarity > best_match['score']:
-                    best_match = {
-                        'score': adjusted_similarity,
-                        'start': current_start_time,
-                        'end': current_end_time,
-                        'word_count': window_size,
-                        'phrase': current_phrase
-                    }
-            
-            # 提高匹配阈值，减少不准确的匹配
-            if best_match['score'] >= 0.75:  
-                time_stamp_list.append((best_match['start'], best_match['end']))
-                
-                console.print(f"✅ 匹配成功: 原句 {repr(sentence)}, 匹配短语 {repr(best_match['phrase'])}, 相似度 {best_match['score']:.2f}")
-            else:
-                console.print(f"❌ 匹配失败: 原句 {repr(sentence)}, 匹配短语 {repr(best_match['phrase'])}, 相似度 {best_match['score']:.2f}")
-                
-                # 如果匹配失败，尝试使用最佳匹配的时间戳
-                if best_match['score'] > 0:
-                    time_stamp_list.append((best_match['start'], best_match['end']))
-                else:
-                    # 将 DataFrame 以 JSON 格式写入 log.txt
-                    with open('output/log/sentences_log.json', 'w', encoding='utf-8') as f:
-                        json.dump(df_sentences.to_dict(orient='records'), f, ensure_ascii=False, indent=2)
-                    raise ValueError(f"❎ 无法匹配句子时间戳：{sentence}。可能是由于背景音乐太大或语言检测不准确。目前无法自动处理，请提交问题报告！")
-            
-            progress.update(task, advance=1)
+        if not match_found:
+            print(f"\n⚠️ Warning: No exact match found for sentence: {sentence}")
+            show_difference(clean_sentence, 
+                          full_words_str[current_pos:current_pos+len(clean_sentence)])
+            print("\nOriginal sentence:", df_sentences['Source'][idx])
+            raise ValueError("❎ No match found for sentence.")
     
     return time_stamp_list
 
-# 其余代码保持不变
 def align_timestamp(df_text, df_translate, subtitle_output_configs: list, output_dir: str, for_display: bool = True):
     """Align timestamps and add a new timestamp column to df_translate"""
     df_trans_time = df_translate.copy()
@@ -122,19 +121,11 @@ def align_timestamp(df_text, df_translate, subtitle_output_configs: list, output
     df_trans_time['timestamp'] = time_stamp_list
     df_trans_time['duration'] = df_trans_time['timestamp'].apply(lambda x: x[1] - x[0])
 
-    # 更严格地处理时间间隔，防止重叠 🕳️
+    # Remove gaps 🕳️
     for i in range(len(df_trans_time)-1):
-        current_end = df_trans_time.loc[i, 'timestamp'][1]
-        next_start = df_trans_time.loc[i+1, 'timestamp'][0]
-        
-        # 如果当前字幕结束时间大于下一个字幕的开始时间，调整时间
-        if current_end > next_start:
-            # 将当前字幕的结束时间设置为下一个字幕开始时间的前0.1秒
-            df_trans_time.at[i, 'timestamp'] = (df_trans_time.loc[i, 'timestamp'][0], next_start - 0.1)
-            
-            # 如果调整后的结束时间小于开始时间，则设置为开始时间
-            if df_trans_time.loc[i, 'timestamp'][1] <= df_trans_time.loc[i, 'timestamp'][0]:
-                df_trans_time.at[i, 'timestamp'] = (df_trans_time.loc[i, 'timestamp'][0], df_trans_time.loc[i, 'timestamp'][0] + 0.1)
+        delta_time = df_trans_time.loc[i+1, 'timestamp'][0] - df_trans_time.loc[i, 'timestamp'][1]
+        if 0 < delta_time < 1:
+            df_trans_time.at[i, 'timestamp'] = (df_trans_time.loc[i, 'timestamp'][0], df_trans_time.loc[i+1, 'timestamp'][0])
 
     # Convert start and end timestamps to SRT format
     df_trans_time['timestamp'] = df_trans_time['timestamp'].apply(lambda x: convert_to_srt_format(x[0], x[1]))
@@ -156,6 +147,7 @@ def align_timestamp(df_text, df_translate, subtitle_output_configs: list, output
     
     return df_trans_time
 
+# ✨ Beautify the translation
 def clean_translation(x):
     if pd.isna(x):
         return ''
@@ -163,28 +155,20 @@ def clean_translation(x):
     return autocorrect.format(cleaned)
 
 def align_timestamp_main():
-    df_text = pd.read_excel('output/log/cleaned_chunks.xlsx')
+    df_text = pd.read_excel(CLEANED_CHUNKS_FILE)
     df_text['text'] = df_text['text'].str.strip('"').str.strip()
-    df_translate = pd.read_excel('output/log/translation_results_for_subtitles.xlsx')
+    df_translate = pd.read_excel(TRANSLATION_RESULTS_FOR_SUBTITLES_FILE)
     df_translate['Translation'] = df_translate['Translation'].apply(clean_translation)
-    subtitle_output_configs = [ 
-        ('src_subtitles.srt', ['Source']),
-        ('trans_subtitles.srt', ['Translation']),
-        ('bilingual_src_trans_subtitles.srt', ['Source', 'Translation']),
-        ('bilingual_trans_src_subtitles.srt', ['Translation', 'Source'])
-    ]
-    align_timestamp(df_text, df_translate, subtitle_output_configs, 'output')
-    console.print("[🎉📝] 字幕生成完成！请在 `output` 文件夹中查看")
+    
+    align_timestamp(df_text, df_translate, SUBTITLE_OUTPUT_CONFIGS, OUTPUT_DIR)
+    console.print(Panel("[bold green]🎉📝 Subtitles generation completed! Please check in the `output` folder 👀[/bold green]"))
 
     # for audio
-    df_translate_for_audio = pd.read_excel('output/log/translation_results.xlsx')
+    df_translate_for_audio = pd.read_excel(TRANSLATION_RESULTS_REMERGED_FILE) # use remerged file to avoid unmatched lines when dubbing
     df_translate_for_audio['Translation'] = df_translate_for_audio['Translation'].apply(clean_translation)
-    subtitle_output_configs = [
-        ('src_subs_for_audio.srt', ['Source']),
-        ('trans_subs_for_audio.srt', ['Translation'])
-    ]
-    align_timestamp(df_text, df_translate_for_audio, subtitle_output_configs, 'output/audio')
-    console.print("[🎉📝] 音频字幕生成完成！请在 `output/audio` 文件夹中查看")
+    
+    align_timestamp(df_text, df_translate_for_audio, AUDIO_SUBTITLE_OUTPUT_CONFIGS, AUDIO_OUTPUT_DIR)
+    console.print(Panel("[bold green]🎉📝 Audio subtitles generation completed! Please check in the `output/audio` folder 👀[/bold green]"))
     
 
 if __name__ == '__main__':

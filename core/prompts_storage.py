@@ -5,119 +5,93 @@ from core.config_utils import load_key
 ## ================================================================
 # @ step4_splitbymeaning.py
 def get_split_prompt(sentence, num_parts = 2, word_limit = 20):
-    # ! only support num_parts = 2
     language = load_key("whisper.detected_language")
     split_prompt = f"""
 ### Role
-You are a professional and experienced Netflix subtitle splitter in {language}.
+You are a professional Netflix subtitle splitter in {language}.
 
 ### Task
-Your task is to split the given subtitle text into **{num_parts}** parts, each should be less than {word_limit} words.
+Split the given subtitle text into {num_parts} parts, each less than {word_limit} words.
 
-### Requirements
-1. Try to maintain the coherence of the sentence meaning, split according to Netflix subtitle standards, ensuring the two parts are relatively independent.
-2. The length of each part should be roughly equal, no part should be less than 3 words, but the integrity of the sentence is more important.
-3. Prioritize splitting at punctuation marks, such as periods, commas, and conjunctions (e.g., "and", "but", "because", "when", "then", "if", "so", "that").
+### Instructions
+1. Maintain sentence meaning coherence according to Netflix subtitle standards
+2. Keep parts roughly equal in length (minimum 3 words each)
+3. Split at natural points like punctuation marks or conjunctions
 
-### Steps
-1. Analyze the grammar and structure of the given text.
-2. Provide 2 different ways to split the text, each with different split points, output complete sentences (do not change any letters or punctuation), insert [br] tags at the split positions.
-3. Briefly compare and evaluate the above 2 split methods, considering readability, grammatical structure, and contextual coherence, choose the best split method.
-4. Give the best split method number, 1 or 2.
-
-### Output Format
-Please provide your answer in the following JSON format, <<>> represents placeholders:
+### Output Format in JSON
 {{
-    "analysis": "Brief analysis of the text structure and split strategy",
-    "split_1": "<<The first split method, output complete sentences, insert [br] as a delimiter at the split position. e.g. this is the first part [br] this is the second part.>>",
-    "split_2": "<<The second split method>>",
-    "eval": "<<Unified brief evaluation of the 2 split methods, written in one sentence, no line breaks>>",
-    "best": "<<The best split method number, 1 or 2>>"
+    "analysis": "Brief analysis of the text structure",
+    "split": "Complete sentence with [br] tags at split positions"
 }}
 
 ### Given Text
-<split_this_sentence>\n{sentence}\n</split_this_sentence>
-
+<split_this_sentence>
+{sentence}
+</split_this_sentence>
 """.strip()
-
     return split_prompt
 
 
 ## ================================================================
 # @ step4_1_summarize.py
 def get_summary_prompt(source_content):
-    src_language = load_key("whisper.detected_language")
-    TARGET_LANGUAGE = load_key("target_language")
+    src_lang = load_key("whisper.detected_language")
+    tgt_lang = load_key("target_language")
     summary_prompt = f"""
 ### Role
-You are a professional video translation expert and terminology consultant. Your expertise lies not only in accurately understanding the original {src_language} text but also in extracting key professional terms and optimizing the translation to better suit the expression habits and cultural background of {TARGET_LANGUAGE}.
+You are a video translation expert and terminology consultant, specializing in {src_lang} comprehension and {tgt_lang} expression optimization.
 
-### Task Description 
-For the provided original {src_language} video text, you need to:
-1. Summarize the video's main topic in one sentence
-2. Extract professional terms and names that appear in the video, and provide {TARGET_LANGUAGE} translations or suggest keeping the original language terms. Avoid extracting simple, common words.
-3. For each translated term or name, provide a brief explanation
+### Task
+For the provided {src_lang} video text:
+1. Summarize main topic in two sentences
+2. Extract professional terms/names with {tgt_lang} translations
+3. Provide brief explanation for each term
 
-### Analysis and Summary Steps
-Please think in two steps, processing the text line by line:  
-1. Topic summarization:
-   - Quickly skim through the entire text to understand the general idea
-   - Summarize the topic in one concise sentence
-2. Term and name extraction:
-   - Carefully read the entire text, marking professional terms and names
-   - For each term or name, provide a {TARGET_LANGUAGE} translation or suggest keeping the original, only the word itself is needed, not the pronunciation
-   - Add a brief explanation for each term or name to help the translator understand
-   - If the word is a fixed abbreviation or a proper name, please keep the original.
+### Steps
+1. Topic Summary:
+   - Quick scan for general understanding
+   - Write two sentences: first for main topic, second for key point
+2. Term Extraction:
+   - Mark professional terms and names
+   - Provide {tgt_lang} translation or keep original
+   - Add brief explanation
+   - Keep abbreviations and proper nouns unchanged
 
 ### Output Format
-Please output your analysis results in the following JSON format, where <> represents placeholders:
 {{
-    "theme": "<Briefly summarize the theme of this video in 1 sentence>",
+    "topic": "Two-sentence video summary",
     "terms": [
         {{
-            "original": "<Term or name 1 in the {src_language}>",
-            "translation": "<{TARGET_LANGUAGE} translation or keep original>",
-            "explanation": "<Brief explanation of the term or name>"
-        }},
-        {{
-            "original": "<Term or name 2 in the {src_language}>",
-            "translation": "<{TARGET_LANGUAGE} translation or keep original>",
-            "explanation": "<Brief explanation of the term or name>"
+            "src": "{src_lang} term",
+            "tgt": "{tgt_lang} translation or original",
+            "note": "Brief explanation"
         }},
         ...
     ]
 }}
 
-### Single Output Example (Using French as an example)
-
+### Example
 {{
-    "theme": "Ce vidéo résume le musée du Louvre à Paris.",
+    "topic": "本视频介绍人工智能在医疗领域的应用现状。重点展示了AI在医学影像诊断和药物研发中的突破性进展。",
     "terms": [
         {{
-            "original": "Mona Lisa",
-            "translation": "La Joconde",
-            "explanation": "Le tableau le plus célèbre du Louvre, un portrait de Léonard de Vinci"
+            "src": "Machine Learning",
+            "tgt": "机器学习",
+            "note": "AI的核心技术，通过数据训练实现智能决策"
         }},
         {{
-            "original": "pyramid",
-            "translation": "la pyramide",
-            "explanation": "Une grande structure en verre et métal en forme de pyramide située à l'entrée principale du Louvre"
-        }},
-        {{
-            "original": "I.M. Pei",
-            "translation": "I.M. Pei",
-            "explanation": "L'architecte américain d'origine chinoise qui a conçu la pyramide du Louvre"
-        }},
-        ...
+            "src": "CNN",
+            "tgt": "CNN",
+            "note": "卷积神经网络，用于医学图像识别的深度学习模型"
+        }}
     ]
 }}
 
-### Video text data to be processed
-<video_text_to_summarize>
+### Source Text
+<text>
 {source_content}
-</video_text_to_summarize>
+</text>
 """.strip()
-
     return summary_prompt
 
 ## ================================================================
@@ -171,8 +145,6 @@ Based on the provided original {src_language} subtitles, you need to:
 1. Faithful to the original: Accurately convey the content and meaning of the original text, without arbitrarily changing, adding, or omitting content.
 2. Accurate terminology: Use professional terms correctly and maintain consistency in terminology.
 3. Understand the context: Fully comprehend and reflect the background and contextual relationships of the text.
-4. Json Only: Return only JSON data, do not return any other content.
-5. Data integrity: The answer must include 'origin' and 'direct'.
 
 ### Subtitle Data
 <subtitles>
@@ -193,8 +165,8 @@ def get_prompt_expressiveness(faithfulness_result, lines, shared_prompt):
         json_format[key] = {
             "origin": value['origin'],
             "direct": value['direct'],
-            "reflection": "<<reflection on the direct translation version>>",
-            "free": f"<<retranslated result, aiming for fluency and naturalness, conforming to {TARGET_LANGUAGE} expression habits, DO NOT leave empty line here!>>"
+            "reflection": "reflection on the direct translation version",
+            "free": f"retranslated result, aiming for fluency and naturalness, conforming to {TARGET_LANGUAGE} expression habits, DO NOT leave empty line here!"
         }
 
     src_language = load_key("whisper.detected_language")
@@ -210,6 +182,7 @@ Based on the provided original {src_language} text and {TARGET_LANGUAGE} direct 
 1. Analyze the direct translation results line by line, pointing out existing issues
 2. Provide detailed modification suggestions
 3. Perform free translation based on your analysis
+4. Do not add comments or explanations in the translation, as the subtitles are for the audience to read
 
 {shared_prompt}
 
@@ -232,9 +205,7 @@ Please use a two-step thinking process to handle the text line by line:
 {lines}
 </subtitles>
 
-### Output Format
-Make sure to generate the correct Json format, don't output " in the value.
-Please complete the following JSON data, where << >> represents placeholders that should not appear in your answer, and return your translation results in JSON format:
+### Output in the following JSON format, repeat "origin" and "direct" in the JSON format
 {json.dumps(json_format, ensure_ascii=False, indent=4)}
 '''
     return prompt_expressiveness.strip()
@@ -258,9 +229,9 @@ We have {src_language} and {target_language} original subtitles for a Netflix pr
 ### Task Description
 Based on the provided original {src_language} and {target_language} original subtitles, as well as the pre-processed split version, you need to:
 1. Analyze the word order and structural correspondence between {src_language} and {target_language} subtitles
-2. Provide 2 different splitting schemes for the {target_language} subtitles
-3. Evaluate these schemes and select the best one
-4. Never leave empty lines. If it's difficult to split based on meaning, you may appropriately rewrite the sentences that need to be aligned
+2. Split the {target_language} subtitles according to the pre-processed {src_language} split version
+3. Never leave empty lines. If it's difficult to split based on meaning, you may appropriately rewrite the sentences that need to be aligned
+4. Do not add comments or explanations in the translation, as the subtitles are for the audience to read
 
 ### Subtitle Data
 <subtitles>
@@ -269,34 +240,20 @@ Based on the provided original {src_language} and {target_language} original sub
 Pre-processed {src_language} Subtitles ([br] indicates split points): {src_part}
 </subtitles>
 
-### Processing Steps
-Please follow these steps and provide the results for each step in the JSON output:
-1. Analysis and Comparison: Briefly analyze the word order, sentence structure, and semantic correspondence between {src_language} and {target_language} subtitles. Point out key word correspondences, similarities and differences in sentence patterns, and language features that may affect splitting.
-2. Start Alignment: Based on your analysis, provide 2 different alignment methods for {target_language} subtitles according to the format. The split positions in {src_language} must be consistent with the pre-processed {src_language} split version and cannot be changed arbitrarily.
-3. Evaluation and Selection: Examine and briefly evaluate the 2 schemes, considering factors such as sentence completeness, semantic coherence, and appropriateness of split points.
-4. Best Scheme: Select the best alignment scheme, output only a single number, 1 or 2, must include the 'best' attribute.
-5. Json Only: Return only JSON data, do not return any other content.
-
-### Output Format
-Please complete the following JSON data, where << >> represents placeholders, and return your results in JSON format:
+### Output in JSON
 {{
-    "analysis": "<<Detailed analysis of word order, structure, and semantic correspondence between {src_language} and {target_language} subtitles>>",
-    "align_1": [
+    "analysis": "Brief analysis of word order, structure, and semantic correspondence between {src_language} and {target_language} subtitles",
+    "align": [
         {align_parts_json}
-    ],
-    "align_2": [
-        {align_parts_json}
-    ],
-    "comparison": "<<Brief evaluation and comparison of the 2 alignment schemes>>",
-    "best": "<<Number of the best alignment scheme, 1 or 2>>"
+    ]
 }}
 '''
 
     align_parts_json = ','.join(
         f'''
         {{
-            "src_part_{i+1}": "<<{src_splits[i]}>>",
-            "target_part_{i+1}": "<<Corresponding aligned {TARGET_LANGUAGE} subtitle part>>"
+            "src_part_{i+1}": "{src_splits[i]}",
+            "target_part_{i+1}": "Corresponding aligned {TARGET_LANGUAGE} subtitle part"
         }}''' for i in range(num_parts)
     )
 
@@ -311,7 +268,7 @@ Please complete the following JSON data, where << >> represents placeholders, an
 
 ## ================================================================
 # @ step8_gen_audio_task.py @ step10_gen_audio.py
-def get_subtitle_trim_prompt(trans_text, duration):
+def get_subtitle_trim_prompt(text, duration):
  
     rule = '''Consider a. Reducing filler words without modifying meaningful content. b. Omitting unnecessary modifiers or pronouns, for example:
     - "Please explain your thought process" can be shortened to "Please explain thought process"
@@ -325,7 +282,7 @@ You are a professional subtitle editor, editing and optimizing lengthy subtitles
 
 ### Subtitle Data
 <subtitles>
-Subtitle: "{trans_text}"
+Subtitle: "{text}"
 Duration: {duration} seconds
 </subtitles>
 
@@ -337,15 +294,14 @@ Please follow these steps and provide the results in the JSON output:
 1. Analysis: Briefly analyze the subtitle's structure, key information, and filler words that can be omitted.
 2. Trimming: Based on the rules and analysis, optimize the subtitle by making it more concise according to the processing rules.
 
-### Output Format
-Please complete the following JSON data, where << >> represents content you need to fill in:
+### Output in JSON
 {{
-    "analysis": "<<Brief analysis of the subtitle, including structure, key information, and potential processing locations>>",
-    "trans_text_processed": "<<Optimized and shortened subtitle in the original subtitle language>>"
+    "analysis": "Brief analysis of the subtitle, including structure, key information, and potential processing locations",
+    "result": "Optimized and shortened subtitle in the original subtitle language"
 }}
 '''
     return trim_prompt.format(
-        trans_text=trans_text,
+        text=text,
         duration=duration,
         rule=rule
     )

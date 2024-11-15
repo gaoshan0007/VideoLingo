@@ -9,6 +9,13 @@ from rich import print as rprint
 import numpy as np
 import soundfile as sf
 import cv2
+from core.all_whisper_methods.demucs_vl import BACKGROUND_AUDIO_FILE
+from core.step7_merge_sub_to_vid import check_gpu_available
+
+INPUT_EXCEL = 'output/audio/sovits_tasks.xlsx'
+OUTPUT_AUDIO = 'output/trans_vocal_total.wav'
+VIDEO_FILE = "output/output_video_with_subs.mp4"
+OUTPUT_VIDEO = "output/output_video_with_audio.mp4"
 
 def time_to_datetime(time_str):
     return datetime.strptime(time_str, '%H:%M:%S.%f')
@@ -21,8 +28,8 @@ def create_silence(duration, output_file):
 
 def merge_all_audio():
     # Define input and output paths
-    input_excel = 'output/audio/sovits_tasks.xlsx'
-    output_audio = 'output/trans_vocal_total.wav'
+    input_excel = INPUT_EXCEL
+    output_audio = OUTPUT_AUDIO
         
     df = pd.read_excel(input_excel)
     
@@ -35,7 +42,6 @@ def merge_all_audio():
 
     prev_target_start_time = None
     prev_actual_duration = 0
-    current_merged_duration = 0
     
     for index, row in df.iterrows():
         number = row['number']
@@ -50,29 +56,13 @@ def merge_all_audio():
         actual_duration = len(audio_segment) / 1000  # Convert to seconds
         target_start_time = time_to_datetime(start_time)
         
-        # 计算预期的开始时间
-        expected_start_time = (target_start_time - datetime(1900, 1, 1)).total_seconds()
+        silence_duration = (target_start_time - datetime(1900, 1, 1)).total_seconds() if prev_target_start_time is None else (target_start_time - prev_target_start_time).total_seconds() - prev_actual_duration
         
-        # 检查当前合并音频的持续时间是否与预期开始时间一致
-        time_difference = abs(current_merged_duration - expected_start_time)
+        if silence_duration > 0:
+            silence = AudioSegment.silent(duration=int(silence_duration * 1000), frame_rate=sample_rate)
+            merged_audio += silence
         
-        if time_difference > 3:  # 如果时间相差超过2秒
-            rprint(f"[bold yellow]Warning: 音频片段 {number} 的开始时间与当前合并音频时间相差 {time_difference:.2f} 秒，进行时间对齐[/bold yellow]")
-            
-            if current_merged_duration < expected_start_time:
-                # 如果当前合并音频时间短于预期，添加静音
-                silence_duration = expected_start_time - current_merged_duration
-                silence = AudioSegment.silent(duration=int(silence_duration * 1000), frame_rate=sample_rate)
-                merged_audio += silence
-                current_merged_duration += silence_duration
-            else:
-                # 如果当前合并音频时间长于预期，截断音频
-                merged_audio = merged_audio[:int(expected_start_time * 1000)]
-                current_merged_duration = expected_start_time
-        
-        # 添加当前音频片段
         merged_audio += audio_segment
-        current_merged_duration += actual_duration
         
         prev_target_start_time = target_start_time
         prev_actual_duration = actual_duration
@@ -83,17 +73,7 @@ def merge_all_audio():
 
 def merge_video_audio():
     """Merge video and audio, and reduce video volume"""
-    video_file = "output/output_video_with_subs.mp4"
-    audio_file = "output/trans_vocal_total.wav"    
-    output_file = "output/output_video_with_audio.mp4"
-    from core.all_whisper_methods.whisperXapi import AUDIO_DIR, VOCAL_AUDIO_FILE, BACKGROUND_AUDIO_FILE
-    background_file = os.path.join(AUDIO_DIR, BACKGROUND_AUDIO_FILE)
-    original_vocal = os.path.join(AUDIO_DIR, VOCAL_AUDIO_FILE)
-    
-
-    if os.path.exists(output_file):
-        rprint(f"[bold yellow]{output_file} already exists, skipping processing.[/bold yellow]")
-        return
+    background_file = BACKGROUND_AUDIO_FILE
     
     if load_key("resolution") == '0x0':
         rprint("[bold yellow]Warning: A 0-second black video will be generated as a placeholder as Resolution is set to 0x0.[/bold yellow]")
@@ -101,7 +81,7 @@ def merge_video_audio():
         # Create a black frame
         frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_file, fourcc, 1, (1920, 1080))
+        out = cv2.VideoWriter(OUTPUT_VIDEO, fourcc, 1, (1920, 1080))
         out.write(frame)
         out.release()
 
@@ -109,19 +89,18 @@ def merge_video_audio():
         return
 
     # Merge video and audio
-    original_volume = load_key("original_volume")
     dub_volume = load_key("dub_volume")
-    cmd = ['ffmpeg', '-y', '-i', video_file, '-i', background_file, '-i', original_vocal, '-i', audio_file, '-filter_complex', f'[1:a]volume=1[a1];[2:a]volume={original_volume}[a2];[3:a]volume={dub_volume}[a3];[a1][a2][a3]amix=inputs=3:duration=first:dropout_transition=3[a]', '-map', '0:v', '-map', '[a]', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', output_file]
+    cmd = ['ffmpeg', '-y', '-i', VIDEO_FILE, '-i', background_file, '-i', OUTPUT_AUDIO, 
+           '-filter_complex', f'[1:a]volume=1[a1];[2:a]volume={dub_volume}[a2];[a1][a2]amix=inputs=2:duration=first:dropout_transition=3[a]']
 
-    try:
-        subprocess.run(cmd, check=True)
-        rprint(f"[bold green]Video and audio successfully merged into {output_file}[/bold green]")
-    except subprocess.CalledProcessError as e:
-        rprint(f"[bold red]Error merging video and audio: {e}[/bold red]")
+    if check_gpu_available():
+        rprint("[bold green]Using GPU acceleration...[/bold green]")
+        cmd.extend(['-c:v', 'h264_nvenc'])
     
-    # Delete temporary audio file
-    if os.path.exists('tmp_audio.wav'):
-        os.remove('tmp_audio.wav')
+    cmd.extend(['-map', '0:v', '-map', '[a]', '-c:a', 'aac', '-b:a', '192k', OUTPUT_VIDEO])
+    
+    subprocess.run(cmd)
+    rprint(f"[bold green]Video and audio successfully merged into {OUTPUT_VIDEO}[/bold green]")
 
 def merge_main():
     merge_all_audio()
