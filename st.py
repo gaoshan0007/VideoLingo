@@ -42,7 +42,7 @@ def text_processing_section():
 
 def process_text():
     with st.spinner("Using Whisper for transcription..."):
-        step2_whisper.transcribe()
+        step2_whisperX.transcribe()
     with st.spinner("Splitting long sentences..."):  
         step3_1_spacy_split.split_by_spacy()
         step3_2_splitbymeaning.split_sentences_by_meaning()

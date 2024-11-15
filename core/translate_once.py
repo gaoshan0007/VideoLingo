@@ -27,14 +27,14 @@ def translate_lines(lines, previous_content_prompt, after_cotent_prompt, things_
     # Retry translation if the length of the original text and the translated text are not the same, or if the specified key is missing
     def retry_translation(prompt, step_name):
         def valid_faith(response_data):
-            return valid_translate_result(response_data, ['1'], ['direct'])
+            return len(lines.split('\n')) == len(response_data) and valid_translate_result(response_data, ['1'], ['direct'])
         def valid_express(response_data):
-            return valid_translate_result(response_data, ['1'], ['free'])
+            return len(lines.split('\n')) == len(response_data) and valid_translate_result(response_data, ['1'], ['free'])
         for retry in range(3):
             if step_name == 'faithfulness':
-                result = ask_gpt(prompt+retry* " ", response_json=True, valid_def=valid_faith, log_title=f'translate_{step_name}')
+                result = ask_gpt(prompt+retry* " ", response_json=True, valid_def=valid_faith, log_title=f'translate_{step_name}', re_try= retry != 1)
             elif step_name == 'expressiveness':
-                result = ask_gpt(prompt+retry* " ", response_json=True, valid_def=valid_express, log_title=f'translate_{step_name}')
+                result = ask_gpt(prompt+retry* " ", response_json=True, valid_def=valid_express, log_title=f'translate_{step_name}', re_try= retry != 1)
             if len(lines.split('\n')) == len(result):
                 return result
             if retry != 2:
