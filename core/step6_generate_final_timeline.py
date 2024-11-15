@@ -79,7 +79,7 @@ def get_sentence_timestamps(df_words, df_sentences):
     
     current_pos = 0
     for idx, sentence in df_sentences['Source'].items():
-        clean_sentence = remove_punctuation(sentence.lower()).replace(" ", "")
+        clean_sentence = remove_punctuation(sentence.lower()).replace(" ", "").replace("<split_this_sentence>","")
         sentence_len = len(clean_sentence)
         
         match_found = False

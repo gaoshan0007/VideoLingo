@@ -48,9 +48,18 @@ def check_len_then_trim(text, duration):
         original_text = text
         prompt = get_subtitle_trim_prompt(text, duration)
         def valid_trim(response):
-            if 'result' not in response:
-                return {'status': 'error', 'message': 'No result in response'}
+            # 严格校验 JSON 结构 
+            if not isinstance(response, dict):
+                return {'status': 'error', 'message': '返回必须是一个字典'}
+            
+            if 'analysis' not in response or not isinstance(response['analysis'], str) or not response['analysis'].strip():
+                return {'status': 'error', 'message': '必须包含非空的 analysis 字段'}
+            
+            if 'result' not in response or not isinstance(response['result'], str) or not response['result'].strip():
+                return {'status': 'error', 'message': '必须包含非空的 result 字段'}
+            
             return {'status': 'success', 'message': ''}
+        
         try:    
             response = ask_gpt(prompt, response_json=True, log_title='subtitle_trim', valid_def=valid_trim)
             shortened_text = response['result']

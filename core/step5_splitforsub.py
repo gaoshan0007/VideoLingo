@@ -42,8 +42,54 @@ def align_subs(src_sub: str, tr_sub: str, src_part: str) -> Tuple[List[str], Lis
     align_prompt = get_align_prompt(src_sub, tr_sub, src_part)
     
     def valid_align(response_data):
-        if 'align' not in response_data:
-            return {"status": "error", "message": "Missing required key: `align`"}
+        # 严格校验返回的 JSON 数据 
+        required_keys = ["analysis", "align"]
+        
+        # 检查所有必需的键是否存在
+        for key in required_keys:
+            if key not in response_data:
+                return {
+                    "status": "error", 
+                    "message": f"缺少必需的键: `{key}`"
+                }
+        
+        # 检查 analysis 是否为非空字符串
+        if not isinstance(response_data["analysis"], str) or not response_data["analysis"].strip():
+            return {
+                "status": "error", 
+                "message": "键 `analysis` 必须是非空字符串"
+            }
+        
+        # 检查 align 是否为非空列表
+        if not isinstance(response_data["align"], list) or len(response_data["align"]) == 0:
+            return {
+                "status": "error", 
+                "message": "键 `align` 必须是非空列表"
+            }
+        
+        # 检查 align 列表中的每个元素
+        for item in response_data["align"]:
+            # 动态检查所有 src_part_N 和 target_part_N
+            part_keys = [key for key in item.keys() if key.startswith('src_part') or key.startswith('target_part')]
+            
+            # 确保每个部分都有对应的源和目标部分
+            src_parts = [key for key in part_keys if key.startswith('src_part')]
+            target_parts = [key for key in part_keys if key.startswith('target_part')]
+            
+            if len(src_parts) != len(target_parts):
+                return {
+                    "status": "error", 
+                    "message": "源语言部分和目标语言部分数量必须相等"
+                }
+            
+            # 检查每个部分是否为非空字符串
+            for key in part_keys:
+                if not isinstance(item[key], str) or not item[key].strip():
+                    return {
+                        "status": "error", 
+                        "message": f"键 `{key}` 必须是非空字符串"
+                    }
+        
         return {"status": "success", "message": "Align completed"}
 
     parsed = ask_gpt(align_prompt, response_json=True, valid_def=valid_align, log_title='align_subs')
