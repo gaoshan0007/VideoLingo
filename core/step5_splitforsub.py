@@ -111,7 +111,7 @@ def align_subs(src_sub: str, tr_sub: str, src_part: str) -> Tuple[List[str], Lis
     
     # 转换 best 为整数
     best = int(parsed['best']) if isinstance(parsed['best'], str) else parsed['best']
-    align_data = parsed[f'align_{best}']
+    align_data = parsed['align']
     
     src_parts = src_part.split('\n')
     tr_parts = [item[f'target_part_{i+1}'].strip() for i, item in enumerate(align_data)]
