@@ -4,7 +4,7 @@ from core.config_utils import load_key
 
 ## ================================================================
 # @ step4_splitbymeaning.py
-def get_split_prompt(sentence, num_parts = 2, word_limit = 20):
+def get_split_prompt(sentence, num_parts = 2, word_limit = 10):
     language = load_key("whisper.detected_language")
     split_prompt = f"""
 ### Role

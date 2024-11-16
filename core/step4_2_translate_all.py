@@ -111,7 +111,7 @@ def translate_all():
             
         trans_text.extend(best_match[0][2].split('\n'))
     
-    # Trim long translation text
+    # Trim long translation text 
     df_text = pd.read_excel(CLEANED_CHUNKS_FILE)
     df_text['text'] = df_text['text'].str.strip('"').str.strip()
     df_translate = pd.DataFrame({'Source': src_text, 'Translation': trans_text})
